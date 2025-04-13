@@ -7,10 +7,6 @@ from pyairtable import Api
 from pinecone import Pinecone
 import logging
 from dotenv import load_dotenv
-
-# Add parent directory to Python path to find config
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from src.enricher import LinkedInEnricher
 from src.analyze_enriched_records import analyze_with_openai
 from src.utils import parse_openai_response

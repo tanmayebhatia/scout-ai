@@ -8,3 +8,5 @@ supabase>=2.0.0
 pinecone>=2.0.0
 fastapi>=0.109.0
 uvicorn>=0.27.0
+pydantic>=2.0.0
+starlette>=0.36.0
