@@ -18,6 +18,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.single_record_enricher import enrich_single_profile
 import os
 import uvicorn
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def enrich_profiles(table, batch_size=50, max_records=None):
     """Step 1: Enrich profiles with ProxyCurl"""
@@ -174,8 +177,11 @@ def main():
     args = parser.parse_args()
     
     setup_logging()
-    api = Api(creds.AIRTABLE_API_KEY)
-    table = api.table(creds.AIRTABLE_BASE_ID, creds.AIRTABLE_TABLE_NAME)
+    api = Api(os.getenv("AIRTABLE_API_KEY"))
+    table = api.table(
+        os.getenv("AIRTABLE_BASE_ID"),
+        os.getenv("AIRTABLE_TABLE_NAME")
+    )
     
     if args.step in ['enrich', 'both']:
         enrich_profiles(table, args.batch_size, args.max_records)

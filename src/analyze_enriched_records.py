@@ -8,6 +8,7 @@ from openai import AsyncOpenAI
 import sys
 import os
 from asyncio import Semaphore
+from dotenv import load_dotenv
 
 # Add parent directory to Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -16,6 +17,8 @@ from src.utils import parse_openai_response
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
+
+load_dotenv()
 
 async def analyze_with_openai(client, profile_data):
     """Analyze profile with OpenAI"""

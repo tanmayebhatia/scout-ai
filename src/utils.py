@@ -1,5 +1,9 @@
 import logging
 from datetime import datetime
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def setup_logging():
     """Setup logging configuration"""
