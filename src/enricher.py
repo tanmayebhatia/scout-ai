@@ -5,7 +5,7 @@ import logging
 import re
 from tqdm import tqdm
 from .rate_limiter import RateLimit
-from src.utils import parse_openai_response  # Change from .utils to src.utils
+from src.utils import parse_openai_response
 import os
 from dotenv import load_dotenv
 from pyairtable import Api
