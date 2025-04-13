@@ -1,0 +1,22 @@
+# Credentials and sensitive data
+config/credentials.py
+*.env
+
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.class
+.Python
+env/
+*.so
+.Python
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
