@@ -6,7 +6,6 @@ from tqdm import tqdm
 from tqdm.asyncio import tqdm_asyncio
 from src.enricher import LinkedInEnricher
 from src.utils import setup_logging, parse_openai_response
-from config.credentials import creds
 import asyncio
 import aiohttp
 from openai import AsyncOpenAI
@@ -107,7 +106,7 @@ async def analyze_profile_async(client, enricher, record, semaphore):
 async def analyze_profiles_async(table, batch_size=50, max_records=None):
     """Analyze profiles concurrently with OpenAI"""
     enricher = LinkedInEnricher()
-    client = AsyncOpenAI(api_key=creds.OPENAI_API_KEY)
+    client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     semaphore = asyncio.Semaphore(25)  # Reduced from 50 to 25
     
     # Get records with raw data but no analysis
@@ -197,9 +196,9 @@ async def process_single_profile(linkedin_url: str) -> AsyncGenerator[str, None]
         # Step 1: Initialize clients
         yield "Initializing clients...\n"
         enricher = LinkedInEnricher()
-        airtable = Api(creds.AIRTABLE_API_KEY)
-        table = airtable.table(creds.AIRTABLE_BASE_ID, creds.AIRTABLE_TABLE_NAME)
-        openai_client = AsyncOpenAI(api_key=creds.OPENAI_API_KEY)
+        airtable = Api(os.getenv("AIRTABLE_API_KEY"))
+        table = airtable.table(os.getenv("AIRTABLE_BASE_ID"), os.getenv("AIRTABLE_TABLE_NAME"))
+        openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         embedder = ProfileEmbedder()
         yield "✅ Clients initialized successfully\n"
 

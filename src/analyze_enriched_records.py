@@ -12,8 +12,6 @@ from dotenv import load_dotenv
 
 # Add parent directory to Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config.credentials import creds
-from src.utils import parse_openai_response
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -123,10 +121,10 @@ async def process_batch(table, client, batch, sem):
     print(f"\nBatch Results: {successful} successful, {failed} failed")
 
 async def main():
-    # Initialize clients and semaphore
-    api = Api(creds.AIRTABLE_API_KEY)
-    table = api.table(creds.AIRTABLE_BASE_ID, creds.AIRTABLE_TABLE_NAME)
-    openai_client = AsyncOpenAI(api_key=creds.OPENAI_API_KEY)
+    # Initialize clients
+    api = Api(os.getenv("AIRTABLE_API_KEY"))
+    table = api.table(os.getenv("AIRTABLE_BASE_ID"), os.getenv("AIRTABLE_TABLE_NAME"))
+    openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     
     # Create semaphore to limit concurrent API calls
     sem = Semaphore(20)  # Limit to 20 concurrent requests

@@ -7,20 +7,21 @@ import sys
 import os
 from pinecone import Pinecone
 import logging
+from dotenv import load_dotenv
 
 # Add parent directory to path to find config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config.credentials import creds
-from pyairtable import Api
+
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 
 class ProfileEmbedder:
     def __init__(self):
-        self.openai_client = AsyncOpenAI(api_key=creds.OPENAI_API_KEY)
-        pc = Pinecone(api_key=creds.PINECONE_API_KEY)
-        self.pinecone_index = pc.Index(creds.PINECONE_INDEX_NAME)
-        self.supabase = create_client(creds.SUPABASE_URL, creds.SUPABASE_KEY)
+        self.openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+        self.pinecone_index = pc.index(os.getenv("PINECONE_INDEX_NAME"))
+        self.supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
     
     def prepare_text_for_embedding(self, profile):
         """Prepare comprehensive text for embedding"""
@@ -202,8 +203,8 @@ class ProfileEmbedder:
 
 async def run_embedder():
     embedder = ProfileEmbedder()
-    api = Api(creds.AIRTABLE_API_KEY)
-    table = api.table(creds.AIRTABLE_BASE_ID, creds.AIRTABLE_TABLE_NAME)
+    api = Api(os.getenv("AIRTABLE_API_KEY"))
+    table = api.table(os.getenv("AIRTABLE_BASE_ID"), os.getenv("AIRTABLE_TABLE_NAME"))
     
     # Get existing IDs from Pinecone
     print("Fetching existing IDs from Pinecone...")
@@ -261,8 +262,8 @@ async def run_embedder():
 
 async def test_embedding():
     embedder = ProfileEmbedder()
-    api = Api(creds.AIRTABLE_API_KEY)
-    table = api.table(creds.AIRTABLE_BASE_ID, creds.AIRTABLE_TABLE_NAME)
+    api = Api(os.getenv("AIRTABLE_API_KEY"))
+    table = api.table(os.getenv("AIRTABLE_BASE_ID"), os.getenv("AIRTABLE_TABLE_NAME"))
     
     print("Fetching from Airtable...")
     try:
