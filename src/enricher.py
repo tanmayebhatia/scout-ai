@@ -5,13 +5,12 @@ import logging
 import re
 from tqdm import tqdm
 from .rate_limiter import RateLimit
-from src.utils import parse_openai_response
 import os
 from dotenv import load_dotenv
 from pyairtable import Api
 import aiohttp
 
-# Load environment variables
+# Remove any config.credentials import!
 load_dotenv()
 
 class LinkedInEnricher:
