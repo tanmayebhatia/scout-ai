@@ -12,7 +12,8 @@ from dotenv import load_dotenv
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.enricher import LinkedInEnricher
-from src.analyze_enriched_records import analyze_with_openai, parse_openai_response
+from src.analyze_enriched_records import analyze_with_openai
+from src.utils import parse_openai_response
 from src.embedder import ProfileEmbedder
 
 logging.basicConfig(level=logging.INFO)

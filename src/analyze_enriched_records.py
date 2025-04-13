@@ -5,13 +5,10 @@ from tqdm import tqdm
 from pyairtable import Api
 import logging
 from openai import AsyncOpenAI
-import sys
 import os
 from asyncio import Semaphore
 from dotenv import load_dotenv
-
-# Add parent directory to Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.utils import parse_openai_response
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
