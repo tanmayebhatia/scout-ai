@@ -199,8 +199,6 @@ def main():
     if args.step in ['analyze', 'both']:
         asyncio.run(analyze_profiles_async(table, args.batch_size, args.max_records))
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
 
 async def process_single_profile(linkedin_url: str) -> AsyncGenerator[str, None]:
     """Process single LinkedIn URL with real-time status updates"""
