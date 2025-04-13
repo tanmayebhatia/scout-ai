@@ -2,7 +2,6 @@ from openai import AsyncOpenAI
 import asyncio
 from tqdm import tqdm
 import json
-from supabase import create_client
 import sys
 import os
 from pinecone import Pinecone
@@ -19,7 +18,6 @@ class ProfileEmbedder:
         self.openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
         self.pinecone_index = pc.Index(os.getenv("PINECONE_INDEX_NAME"))
-        self.supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
     
     def prepare_text_for_embedding(self, profile):
         """Prepare comprehensive text for embedding"""
@@ -110,37 +108,6 @@ class ProfileEmbedder:
             logging.error(f"Error getting embedding: {e}")
             return None
     
-    async def store_in_supabase(self, record_id, embedding, text, profile):
-        """Store embedding with metadata in Supabase"""
-        try:
-            raw_data = json.loads(profile.get('fields', {}).get('Raw_Enriched_Data', '{}'))
-            metadata = {
-                'record_id': record_id,
-                'full_name': raw_data.get('full_name', ''),
-                'headline': raw_data.get('headline', ''),
-                'current_company': raw_data.get('experiences', [{}])[0].get('company', ''),
-                'location': f"{raw_data.get('city', '')} {raw_data.get('state', '')} {raw_data.get('country', '')}".strip(),
-                'linkedin_url': raw_data.get('public_identifier', ''),
-                'ai_summary': profile.get('fields', {}).get('AI_Summary', ''),
-                'companies': profile.get('fields', {}).get('Previous_Companies', ''),
-                'persona_tags': profile.get('fields', {}).get('Persona Tags (Filter Field)', ''),
-                'events_attended': profile.get('fields', {}).get('⚡️🗓 All Events Attended', ''),
-                'email': profile.get('fields', {}).get('Email', 'email not available')
-            }
-            
-            data = {
-                'record_id': record_id,
-                'embedding': embedding,
-                'content': text,
-                'metadata': metadata
-            }
-            
-            self.supabase.table('profile_embeddings').insert(data).execute()
-            return True
-        except Exception as e:
-            print(f"Error storing in Supabase: {e}")
-            return False
-
     def get_existing_ids(self):
         """Get just the IDs of records already in Pinecone"""
         try:
