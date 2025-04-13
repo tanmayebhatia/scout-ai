@@ -21,6 +21,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Create FastAPI app
+app = FastAPI()
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Update with your Vercel URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 def enrich_profiles(table, batch_size=50, max_records=None):
     """Step 1: Enrich profiles with ProxyCurl"""
     enricher = LinkedInEnricher()
