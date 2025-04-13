@@ -6,15 +6,19 @@ import re
 from tqdm import tqdm
 from .rate_limiter import RateLimit
 from src.utils import parse_openai_response  # Change from .utils to src.utils
-from config.credentials import creds
-import time
+import os
+from dotenv import load_dotenv
 from pyairtable import Api
 import aiohttp
+
+# Load environment variables
+load_dotenv()
 
 class LinkedInEnricher:
     def __init__(self):
         self.rate_limiter = RateLimit(limit=200, interval=60)
-        self.openai_client = OpenAI(api_key=creds.OPENAI_API_KEY)
+        self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.proxy_curl_key = os.getenv("PROXY_CURL_API_KEY")
     
     def is_valid_profile_url(self, url):
         """Check if URL is a valid LinkedIn profile URL"""
@@ -32,7 +36,7 @@ class LinkedInEnricher:
                 return "No LinkedIn URL provided"
                 
             headers = {
-                'Authorization': f'Bearer {creds.PROXY_CURL_API_KEY}'
+                'Authorization': f'Bearer {self.proxy_curl_key}'
             }
             
             async with aiohttp.ClientSession() as session:
@@ -102,8 +106,8 @@ class LinkedInEnricher:
     def enrich_missing_profiles(self):
         """Enrich profiles in Airtable that don't have raw enrichment data"""
         # Initialize Airtable
-        airtable = Api(creds.AIRTABLE_API_KEY)
-        table = airtable.table(creds.AIRTABLE_BASE_ID, 'Contacts')
+        airtable = Api(os.getenv("AIRTABLE_API_KEY"))
+        table = airtable.table(os.getenv("AIRTABLE_BASE_ID"), 'Contacts')
         
         # Get all records
         records = table.all()

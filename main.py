@@ -14,6 +14,10 @@ import time
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from typing import AsyncGenerator
+from fastapi.middleware.cors import CORSMiddleware
+from src.single_record_enricher import enrich_single_profile
+import os
+import uvicorn
 
 def enrich_profiles(table, batch_size=50, max_records=None):
     """Step 1: Enrich profiles with ProxyCurl"""
@@ -179,7 +183,7 @@ def main():
         asyncio.run(analyze_profiles_async(table, args.batch_size, args.max_records))
 
 if __name__ == "__main__":
-    main()
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
 
 async def process_single_profile(linkedin_url: str) -> AsyncGenerator[str, None]:
     """Process single LinkedIn URL with real-time status updates"""
