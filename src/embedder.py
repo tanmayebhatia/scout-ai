@@ -18,7 +18,7 @@ class ProfileEmbedder:
     def __init__(self):
         self.openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-        self.pinecone_index = pc.index(os.getenv("PINECONE_INDEX_NAME"))
+        self.pinecone_index = pc.Index(os.getenv("PINECONE_INDEX_NAME"))
         self.supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
     
     def prepare_text_for_embedding(self, profile):
