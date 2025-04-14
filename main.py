@@ -7,6 +7,7 @@ from tqdm.asyncio import tqdm_asyncio
 from src.enricher import LinkedInEnricher
 from src.utils import setup_logging, parse_openai_response
 from src.embedder import ProfileEmbedder
+from src.analyze_enriched_records import analyze_with_openai
 import asyncio
 import aiohttp
 from openai import AsyncOpenAI
