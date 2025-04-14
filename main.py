@@ -247,6 +247,8 @@ async def process_single_profile(linkedin_url: str) -> AsyncGenerator[str, None]
                 'AI_Summary': summary,
                 'Location': location
             })
+            # Get the updated record for embedding
+            airtable_record = table.get(airtable_record['id'])
             yield "✅ OpenAI analysis complete and stored\n"
         else:
             yield "⚠️ OpenAI analysis failed\n"

@@ -139,27 +139,26 @@ class ProfileEmbedder:
             raw_data = json.loads(profile.get('fields', {}).get('Raw_Enriched_Data', '{}'))
             experiences = raw_data.get('experiences', [{}])
             current_company = experiences[0].get('company', '') if experiences else ''
+            fields = profile.get('fields', {})
             
             # Ensure no null values in metadata
             metadata = {
                 'record_id': profile['id'],
                 'full_name': raw_data.get('full_name', ''),
                 'headline': raw_data.get('headline', ''),
-                'current_company': current_company or 'No current company',  # Default if empty
+                'current_company': current_company or 'No current company',
                 'location': f"{raw_data.get('city', '')} {raw_data.get('state', '')} {raw_data.get('country', '')}".strip() or 'No location',
                 'linkedin_url': raw_data.get('public_identifier', '') or 'No URL',
-                'ai_summary': profile.get('fields', {}).get('AI_Summary', '') or 'No summary',
-                'companies': profile.get('fields', {}).get('Previous_Companies', '') or 'No companies',
-                'persona_tags': profile.get('fields', {}).get('Persona Tags (Filter Field)', '') or 'No tags',
-                'events_attended': profile.get('fields', {}).get('⚡️🗓 All Events Attended', '') or 'No events',
+                'ai_summary': fields.get('AI_Summary', 'No summary'),
+                'companies': fields.get('Previous_Companies', 'No companies'),
+                'persona_tags': fields.get('Persona Tags (Filter Field)', 'No tags'),
+                'events_attended': fields.get('⚡️🗓 All Events Attended', 'No events'),
                 'email': profile.get('fields', {}).get('Email', 'email not available')
             }
             
-            # Validate no nulls exist
-            for key, value in metadata.items():
-                if value is None:
-                    metadata[key] = f'No {key}'
-                
+            # Log metadata for debugging
+            logging.info(f"Prepared metadata for record {profile['id']}: {json.dumps(metadata, indent=2)}")
+            
             return metadata
         
         except Exception as e:
