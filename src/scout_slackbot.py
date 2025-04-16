@@ -19,25 +19,27 @@ class ScoutSlackBot:
         self.logger.info(f"OpenAI Key exists: {bool(os.environ.get('OPENAI_API_KEY'))}")
         self.logger.info(f"OpenAI Key starts with: {os.environ.get('OPENAI_API_KEY')[:10]}...")
         
-        # Initialize clients with async
+        # Initialize non-async clients
         self.slack_app = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN"))
         self.openai_client = AsyncOpenAI()
         
-        # Initialize Pinecone with new API
+        # Initialize Pinecone
         self.pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
         self.index = self.pc.Index(os.environ.get("PINECONE_INDEX"))
         self.logger.info("✅ Pinecone initialized")
         
-        # Setup async socket mode
-        self.socket_handler = AsyncSocketModeHandler(
-            app=self.slack_app,
-            app_token=os.environ.get("SLACK_APP_TOKEN")
-        )
-        
-        self.session = None  # Will store aiohttp session
-        
-        self._register_handlers()
-        self.logger.info("Scout bot initialized")
+        # Will be initialized in setup()
+        self.socket_handler = None
+        self.session = None
+    
+    async def setup(self):
+        """Initialize async components"""
+        if self.socket_handler is None:
+            self.socket_handler = AsyncSocketModeHandler(
+                app=self.slack_app,
+                app_token=os.environ.get("SLACK_APP_TOKEN")
+            )
+            self._register_handlers()
     
     def _register_handlers(self):
         @self.slack_app.event("app_mention")
@@ -136,13 +138,8 @@ class ScoutSlackBot:
     async def start(self):
         """Start socket mode"""
         self.logger.info("Starting socket mode...")
-        # Create session
-        self.session = aiohttp.ClientSession()
-        try:
-            await self.socket_handler.start_async()
-        finally:
-            if self.session:
-                await self.session.close()
+        await self.setup()
+        await self.socket_handler.start_async()
     
     async def cleanup(self):
         """Cleanup resources"""

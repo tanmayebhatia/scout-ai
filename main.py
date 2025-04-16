@@ -296,6 +296,7 @@ async def slack_events(request: Request):
 
 @app.on_event("startup")
 async def startup_event():
+    await scout_bot.setup()  # Setup async components
     asyncio.create_task(scout_bot.start())
     print("🤖 Scout bot socket mode activated")
 
