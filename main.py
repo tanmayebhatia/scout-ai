@@ -12,7 +12,7 @@ import asyncio
 import aiohttp
 from openai import AsyncOpenAI
 import time
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from typing import AsyncGenerator
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,11 +20,16 @@ from src.single_record_enricher import enrich_single_profile
 import os
 import uvicorn
 from dotenv import load_dotenv
+from src.scout_slackbot import ScoutSlackBot
+import threading
 
 load_dotenv()
 
 # Create FastAPI app
 app = FastAPI()
+
+# Initialize Scout bot
+scout_bot = ScoutSlackBot()
 
 # Configure CORS
 app.add_middleware(
@@ -280,6 +285,30 @@ async def process_profile(linkedin_url: str):
         media_type='text/event-stream'
     )
 
+@app.get("/")
+async def root():
+    return {"status": "ok"}
+
+# Keep the HTTP endpoint for Railway
+@app.post("/slack/events")
+async def slack_events(request: Request):
+    return await scout_bot.http_handler.handle(request)
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(scout_bot.start())
+    print("🤖 Scout bot socket mode activated")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await scout_bot.cleanup()
+    print("🤖 Scout bot shutdown complete")
+
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(
+        "main:app", 
+        host="0.0.0.0", 
+        port=port,
+        workers=1  # Important for WebSocket connections
+    )

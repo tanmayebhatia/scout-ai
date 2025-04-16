@@ -20,3 +20,21 @@ env/
 .idea/
 .vscode/
 *.swp
+
+# Affinity API credentials
+.env
+credentials.json
+config.json
+secrets.json
+
+# Affinity data files
+Affinity/data/*.json
+Affinity/data/*.csv
+Affinity/data/last_token.txt
+atlas tests/*
+
+# Cache
+cache/*
+
+# Credentials
+.env
