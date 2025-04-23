@@ -2,7 +2,7 @@ import json
 import time
 import asyncio
 from datetime import datetime
-from tcona qdm import tqdm
+from tqdm import tqdm
 from pyairtable import Api
 import logging
 from openai import AsyncOpenAI
