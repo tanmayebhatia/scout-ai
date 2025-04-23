@@ -8,11 +8,10 @@ from pinecone import Pinecone
 import logging
 from dotenv import load_dotenv
 from src.enricher import LinkedInEnricher
-from src.analyze_enriched_records import analyze_with_openai
-from src.utils import parse_openai_response
 from src.embedder import ProfileEmbedder
 import re
 from typing import Dict, Any, List, Tuple, Optional
+import datetime
 
 logging.basicConfig(level=logging.INFO)
 
@@ -72,11 +71,10 @@ async def extract_field_data(enriched_data: Dict[str, Any]) -> Dict[str, Any]:
         # Work Experience (yrs)
         total_experience = 0
         for exp in enriched_data.get('experiences', []):
-            if exp.get('starts_at') and exp.get('ends_at'):
+            if exp.get('starts_at'):
                 start_year = exp.get('starts_at', {}).get('year', 0)
                 # If still current, use current year
-                if not exp.get('ends_at', {}).get('year'):
-                    import datetime
+                if not exp.get('ends_at') or not exp.get('ends_at', {}).get('year'):
                     end_year = datetime.datetime.now().year
                 else:
                     end_year = exp.get('ends_at', {}).get('year', 0)
@@ -101,16 +99,16 @@ async def create_embedding_summary(client: AsyncOpenAI, enriched_data: Dict[str,
         {json.dumps(enriched_data)}
         
         You are an AI assistant generating concise summaries of professional profiles for use in vector search and semantic retrieval.
-Your output will be embedded, so it should be dense, fact-based, and avoid fluff or filler.
-
-Focus on:
-- Current role and company
-- Past roles and unique domain expertise
-- Any decision-making scope (e.g. GTM, platform strategy)
-- Industry terms (e.g. cloud security, POS, SaaS, AppSec)
-
-Output a single paragraph of plain text optimized for semantic embedding. Do not output JSON or bullet points.
-Keep it under 150 tokens.
+        Your output will be embedded, so it should be dense, fact-based, and avoid fluff or filler.
+        
+        Focus on:
+        - Current role and company
+        - Past roles and unique domain expertise
+        - Any decision-making scope (e.g. GTM, platform strategy)
+        - Industry terms (e.g. cloud security, POS, SaaS, AppSec)
+        
+        Output a single paragraph of plain text optimized for semantic embedding. Do not output JSON or bullet points.
+        Keep it under 150 tokens.
         """
         
         response = await client.chat.completions.create(
@@ -144,16 +142,23 @@ async def enrich_single_profile(linkedin_url: str):
 
         # Check if profile exists
         logging.info("Checking if profile exists...")
-        records = table.all(formula=f"{{LinkedIn URL}} = '{linkedin_url}'")
-        if records:
-            logging.info("⚠️ Profile already exists in database")
-            return records[0]['id']
+        try:
+            records = table.all(formula=f"{{LinkedIn URL}} = '{linkedin_url}'")
+            if records:
+                logging.info("⚠️ Profile already exists in database")
+                return records[0]['id']
+        except Exception as e:
+            logging.error(f"Error checking for existing profile: {str(e)}")
+            # Continue anyway - we'll try to create a new record
 
         # Enrich with Proxy Curl
         logging.info("Enriching profile with Proxy Curl...")
         enriched_data = await enricher.enrich_profile(linkedin_url)
-        if not enriched_data or enriched_data in ["No LinkedIn URL provided", "LinkedIn profile not found (404)"]:
-            logging.error("❌ Failed to enrich profile")
+        if not enriched_data:
+            logging.error("❌ Failed to enrich profile - no data returned")
+            return None
+        if isinstance(enriched_data, str) and "not found" in enriched_data.lower():
+            logging.error(f"❌ Failed to enrich profile: {enriched_data}")
             return None
         logging.info("✅ Profile enriched successfully")
 
@@ -184,17 +189,23 @@ async def enrich_single_profile(linkedin_url: str):
             
         # Create and store embedding
         logging.info("Creating embedding...")
-        text = embedder.prepare_text_for_embedding({'fields': extracted_fields})
-        if text:
-            embedding = await embedder.get_embedding(text)
-            metadata = embedder.prepare_metadata({'fields': extracted_fields})
-            if embedding and metadata:
-                embedder.pinecone_index.upsert(
-                    vectors=[(record_id, embedding, metadata)]
-                )
-                logging.info("✅ Embedding created and stored in Pinecone")
+        try:
+            text = embedder.prepare_text_for_embedding({'fields': extracted_fields})
+            if text:
+                embedding = await embedder.get_embedding(text)
+                metadata = embedder.prepare_metadata({'fields': extracted_fields})
+                if embedding and metadata:
+                    embedder.pinecone_index.upsert(
+                        vectors=[(record_id, embedding, metadata)]
+                    )
+                    logging.info("✅ Embedding created and stored in Pinecone")
+                else:
+                    logging.warning("⚠️ Failed to create embedding - empty data")
             else:
-                logging.warning("⚠️ Failed to create embedding")
+                logging.warning("⚠️ Failed to prepare text for embedding")
+        except Exception as e:
+            logging.error(f"Error creating embedding: {str(e)}")
+            # Continue anyway - we already created the record
 
         logging.info("🎉 Processing complete!")
         return record_id
