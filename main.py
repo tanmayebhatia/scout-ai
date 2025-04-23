@@ -50,7 +50,7 @@ def enrich_profiles(table, batch_size=50, max_records=None):
     # Filter records needing enrichment
     to_enrich = [
         record for record in all_records 
-        if 'Raw_Enriched_Data' not in record['fields']
+        if '⚓️ Raw_Enriched_Data' not in record['fields']
         and 'linkedin_url' in record['fields']
         and enricher.is_valid_profile_url(record['fields']['linkedin_url'])
     ]
@@ -77,7 +77,7 @@ def enrich_profiles(table, batch_size=50, max_records=None):
             {
                 'id': item['record_id'],
                 'fields': {
-                    'Raw_Enriched_Data': json.dumps(item['data'])
+                    '⚓️ Raw_Enriched_Data': json.dumps(item['data'])
                 }
             } 
             for item in enriched_data
@@ -238,7 +238,7 @@ async def process_single_profile(linkedin_url: str) -> AsyncGenerator[str, None]
         yield "Creating record in Airtable...\n"
         airtable_record = table.create({
             'linkedin_url': linkedin_url,
-            'Raw_Enriched_Data': json.dumps(enriched_data)
+            '⚓️ Raw_Enriched_Data': json.dumps(enriched_data)
         })
         yield f"✅ Created Airtable record: {airtable_record['id']}\n"
 
@@ -268,10 +268,10 @@ async def process_single_profile(linkedin_url: str) -> AsyncGenerator[str, None]
         if embedding_summary:
             # Update the record with extracted and generated data
             table.update(airtable_record['id'], {
-                'embedding_summary': embedding_summary,
-                'Location': location,
-                'Current Role': current_role,
-                'Past Roles': previous_companies
+                '⚓️ embedding_summary': embedding_summary,
+                '⚓️ Location': location,
+                '⚓️ Current Role': current_role,
+                '⚓️ Past Roles': previous_companies
             })
             yield "✅ Profile analysis complete\n"
         else:
