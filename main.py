@@ -7,7 +7,7 @@ from tqdm.asyncio import tqdm_asyncio
 from src.enricher import LinkedInEnricher
 from src.utils import setup_logging, parse_openai_response
 from src.embedder import ProfileEmbedder
-from src.analyze_enriched_records import analyze_with_openai
+from src.analyze_enriched_records import generate_embedding_summary
 import asyncio
 import aiohttp
 from openai import AsyncOpenAI
@@ -234,7 +234,7 @@ async def process_single_profile(linkedin_url: str) -> AsyncGenerator[str, None]
             raise HTTPException(status_code=400, detail="Failed to enrich profile")
         yield "✅ Profile enriched successfully\n"
 
-        # Step 4: Create Airtable record
+        # Step 4: Create Airtable record with raw data first
         yield "Creating record in Airtable...\n"
         airtable_record = table.create({
             'linkedin_url': linkedin_url,
@@ -242,24 +242,43 @@ async def process_single_profile(linkedin_url: str) -> AsyncGenerator[str, None]
         })
         yield f"✅ Created Airtable record: {airtable_record['id']}\n"
 
-        # Step 5: Analyze with OpenAI
-        yield "Analyzing profile with OpenAI...\n"
-        analysis = await analyze_with_openai(openai_client, enriched_data)
-        if analysis:
-            companies, summary, location = parse_openai_response(analysis)
+        # Step 5: Generate embedding summary
+        yield "Generating embedding summary...\n"
+        embedding_summary = await generate_embedding_summary(openai_client, enriched_data)
+        
+        # Extract key data from enriched_data
+        location = enriched_data.get('location', '')
+        
+        # Extract current role
+        current_role = ""
+        if enriched_data.get('job_title'):
+            current_role = enriched_data.get('job_title')
+            if enriched_data.get('company'):
+                current_role += f" at {enriched_data.get('company')}"
+        
+        # Get past companies
+        past_companies = []
+        if enriched_data.get('experiences') and len(enriched_data.get('experiences')) > 1:
+            for exp in enriched_data.get('experiences')[1:]:  # Skip first (current) role
+                if exp.get('company'):
+                    past_companies.append(exp.get('company'))
+        
+        previous_companies = ", ".join(past_companies)
+        
+        if embedding_summary:
+            # Update the record with extracted and generated data
             table.update(airtable_record['id'], {
-                'Previous_Companies': companies,
-                'AI_Summary': summary,
-                'Location': location
+                'embedding_summary': embedding_summary,
+                'Location': location,
+                'Current Role': current_role,
+                'Past Roles': previous_companies
             })
-            # Get the updated record for embedding
-            airtable_record = table.get(airtable_record['id'])
-            yield "✅ OpenAI analysis complete and stored\n"
+            yield "✅ Profile analysis complete\n"
         else:
-            yield "⚠️ OpenAI analysis failed\n"
+            yield "⚠️ Could not generate embedding summary\n"
 
-        # Step 6: Create and store embedding
-        yield "Creating embedding...\n"
+        # Step 6: Create embedding
+        yield "Creating vector embedding...\n"
         text = embedder.prepare_text_for_embedding(airtable_record)
         if text:
             embedding = await embedder.get_embedding(text)
@@ -268,15 +287,19 @@ async def process_single_profile(linkedin_url: str) -> AsyncGenerator[str, None]
                 embedder.pinecone_index.upsert(
                     vectors=[(airtable_record['id'], embedding, metadata)]
                 )
-                yield "✅ Embedding created and stored in Pinecone\n"
+                yield "✅ Embedding created and stored\n"
             else:
-                yield "⚠️ Failed to create embedding\n"
+                yield "⚠️ Could not create embedding metadata\n"
+        else:
+            yield "⚠️ Could not prepare text for embedding\n"
 
-        yield "🎉 Processing complete!\n"
+        # All done!
+        yield "🎉 Profile processed successfully!\n"
 
     except Exception as e:
+        logging.error(f"Error in process_single_profile: {str(e)}")
         yield f"❌ Error: {str(e)}\n"
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Error processing profile: {str(e)}")
 
 @app.post("/api/process-profile")
 async def process_profile(linkedin_url: str):

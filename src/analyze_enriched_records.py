@@ -248,29 +248,90 @@ async def generate_embedding_summary(client, profile_data):
             model="gpt-3.5-turbo-0125",
             messages=[
                 {"role": "system", "content": "You are an expert at summarizing professional profiles for use in AI-powered search."},
-                {"role": "user", "content": f"""You are an AI assistant generating concise summaries of professional profiles for use in vector search and semantic retrieval.
-Your output will be embedded, so it should be dense, fact-based, and avoid fluff or filler.
-
-Focus on:
-- Current role and company
-- Past roles and unique domain expertise
-- Any decision-making scope (e.g. GTM, platform strategy)
-- Industry terms (e.g. cloud security, POS, SaaS, AppSec)
-
-Output a single paragraph of plain text optimized for semantic embedding. Do not output JSON or bullet points.
-Keep it under 150 tokens. 
-Profile:
-{json.dumps(profile_summary, indent=2)}
-"""}
+                {"role": "user", "content": f"""
+                You are an AI assistant generating concise summaries of professional profiles for use in vector search and semantic retrieval.
+                Your output will be embedded, so it should be dense, fact-based, and avoid fluff or filler.
+                
+                Focus on:
+                - Current role and company
+                - Past roles and unique domain expertise
+                - Any decision-making scope (e.g. GTM, platform strategy)
+                - Industry terms (e.g. cloud security, POS, SaaS, AppSec)
+                
+                Here's the LinkedIn profile data:
+                {json.dumps(profile_summary, indent=2)}
+                
+                Output a single paragraph of plain text optimized for semantic embedding. Do not output JSON or bullet points.
+                Keep it under 150 tokens.
+                """}
             ],
-            temperature=0.5
+            temperature=0.3,
+            max_tokens=500
         )
         
-        return response.choices[0].message.content
-        
+        return response.choices[0].message.content.strip()
     except Exception as e:
         logging.error(f"Error generating embedding summary: {str(e)}")
-        return None
+        return ""
+
+async def analyze_with_openai(client, profile_data):
+    """
+    Analyze LinkedIn profile data with OpenAI to extract key information.
+    This function is used by the web app to process individual profiles.
+    """
+    try:
+        # Prepare the data
+        name = profile_data.get('full_name', '')
+        current_role = extract_current_role(profile_data)
+        past_roles = extract_past_roles(profile_data)
+        experience_years = calculate_work_experience(profile_data)
+        education = extract_education(profile_data)
+        location = extract_location(profile_data)
+        
+        # Create a profile summary for OpenAI
+        profile_summary = {
+            "name": name,
+            "current_role": current_role,
+            "past_roles": past_roles,
+            "years_experience": experience_years,
+            "education": education,
+            "location": location
+        }
+        
+        # Call OpenAI
+        response = await client.chat.completions.create(
+            model="gpt-3.5-turbo-0125",
+            messages=[
+                {"role": "system", "content": "You extract structured information from LinkedIn profiles."},
+                {"role": "user", "content": f"""
+                Extract the following information from this LinkedIn profile:
+
+                Profile data:
+                {json.dumps(profile_summary, indent=2)}
+
+                Format your response as a JSON object with these exact keys:
+                1. "previous_companies": A comma-separated list of previous company names (excluding the current company)
+                2. "summary": A concise 1-2 sentence professional summary highlighting key expertise
+                3. "location": The professional's location (city, state, country)
+
+                Example:
+                {{
+                  "previous_companies": "Google, Facebook, Startup Inc",
+                  "summary": "Software engineer with 10 years of experience in cloud infrastructure and security",
+                  "location": "San Francisco, CA, USA"
+                }}
+                """}
+            ],
+            temperature=0.3,
+            max_tokens=500,
+            response_format={"type": "json_object"}
+        )
+        
+        # Parse and return the JSON response
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logging.error(f"Error analyzing profile with OpenAI: {str(e)}")
+        return ""
 
 async def process_batch(table, client, batch, sem):
     """Process a batch of records with semaphore control"""
