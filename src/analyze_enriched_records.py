@@ -314,7 +314,7 @@ async def process_batch(table, client, batch, sem):
                     
                     # Prepare data for Airtable update, all as strings
                     airtable_data = {
-                        '⚓️ Current Role': str(current_role),
+                        '⚓️ Current Roles': str(current_role),
                         '⚓️ Past Roles': str(past_roles_str),
                         '⚓️ Work Experience (yrs)': str(work_experience),
                         '⚓️ Education': str(education_str),
@@ -326,7 +326,7 @@ async def process_batch(table, client, batch, sem):
                     try:
                         simplified_data = {
                             '⚓️ embedding_summary': str(embedding_summary),
-                            '⚓️ Current Role': str(current_role)
+                            '⚓️ Current Roles': str(current_role)
                         }
                         table.update(record['id'], simplified_data)
                         return True, None

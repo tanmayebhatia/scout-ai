@@ -27,7 +27,7 @@ async def extract_field_data(enriched_data: Dict[str, Any]) -> Dict[str, Any]:
             current_role = enriched_data.get('job_title')
             if enriched_data.get('company'):
                 current_role += f" at {enriched_data.get('company')}"
-            extracted['⚓️ Current Roles'] = current_role
+            extracted['⚓️ Current Roless'] = current_role
         
         # Education
         if enriched_data.get('education'):
@@ -229,7 +229,7 @@ if __name__ == "__main__":
         if record_id:
             print(f"\n✅ Success! Record ID: {record_id}")
             print(f"\nProfile added to database with destination fields:")
-            print("- ⚓️ Current Roles")
+            print("- ⚓️ Current Roless")
             print("- ⚓️ Education")
             print("- ⚓️ embedding_summary")
             print("- ⚓️ Location")

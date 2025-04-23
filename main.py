@@ -270,7 +270,7 @@ async def process_single_profile(linkedin_url: str) -> AsyncGenerator[str, None]
             table.update(airtable_record['id'], {
                 '⚓️ embedding_summary': embedding_summary,
                 '⚓️ Location': location,
-                '⚓️ Current Role': current_role,
+                '⚓️ Current Roles': current_role,
                 '⚓️ Past Roles': previous_companies
             })
             yield "✅ Profile analysis complete\n"
