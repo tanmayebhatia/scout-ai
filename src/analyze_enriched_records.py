@@ -2,7 +2,7 @@ import json
 import time
 import asyncio
 from datetime import datetime
-from tqdm import tqdm
+from tcona qdm import tqdm
 from pyairtable import Api
 import logging
 from openai import AsyncOpenAI
@@ -255,8 +255,8 @@ async def generate_embedding_summary(client, profile_data):
                 Focus on:
                 - Current role and company
                 - Past roles and unique domain expertise
-                - Any decision-making scope (e.g. GTM, platform strategy)
-                - Industry terms (e.g. cloud security, POS, SaaS, AppSec)
+                - Any decision-making scope 
+                - Specific industry terms 
                 
                 Here's the LinkedIn profile data:
                 {json.dumps(profile_summary, indent=2)}
@@ -272,65 +272,6 @@ async def generate_embedding_summary(client, profile_data):
         return response.choices[0].message.content.strip()
     except Exception as e:
         logging.error(f"Error generating embedding summary: {str(e)}")
-        return ""
-
-async def analyze_with_openai(client, profile_data):
-    """
-    Analyze LinkedIn profile data with OpenAI to extract key information.
-    This function is used by the web app to process individual profiles.
-    """
-    try:
-        # Prepare the data
-        name = profile_data.get('full_name', '')
-        current_role = extract_current_role(profile_data)
-        past_roles = extract_past_roles(profile_data)
-        experience_years = calculate_work_experience(profile_data)
-        education = extract_education(profile_data)
-        location = extract_location(profile_data)
-        
-        # Create a profile summary for OpenAI
-        profile_summary = {
-            "name": name,
-            "current_role": current_role,
-            "past_roles": past_roles,
-            "years_experience": experience_years,
-            "education": education,
-            "location": location
-        }
-        
-        # Call OpenAI
-        response = await client.chat.completions.create(
-            model="gpt-3.5-turbo-0125",
-            messages=[
-                {"role": "system", "content": "You extract structured information from LinkedIn profiles."},
-                {"role": "user", "content": f"""
-                Extract the following information from this LinkedIn profile:
-
-                Profile data:
-                {json.dumps(profile_summary, indent=2)}
-
-                Format your response as a JSON object with these exact keys:
-                1. "previous_companies": A comma-separated list of previous company names (excluding the current company)
-                2. "summary": A concise 1-2 sentence professional summary highlighting key expertise
-                3. "location": The professional's location (city, state, country)
-
-                Example:
-                {{
-                  "previous_companies": "Google, Facebook, Startup Inc",
-                  "summary": "Software engineer with 10 years of experience in cloud infrastructure and security",
-                  "location": "San Francisco, CA, USA"
-                }}
-                """}
-            ],
-            temperature=0.3,
-            max_tokens=500,
-            response_format={"type": "json_object"}
-        )
-        
-        # Parse and return the JSON response
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        logging.error(f"Error analyzing profile with OpenAI: {str(e)}")
         return ""
 
 async def process_batch(table, client, batch, sem):
@@ -373,19 +314,19 @@ async def process_batch(table, client, batch, sem):
                     
                     # Prepare data for Airtable update, all as strings
                     airtable_data = {
-                        'Current Role': str(current_role),
-                        'Past Roles': str(past_roles_str),
-                        'Work Experience (yrs)': str(work_experience),
-                        'Education': str(education_str),
-                        'embedding_summary': str(embedding_summary),
-                        'Location': str(location)
+                        '⚓️ Current Role': str(current_role),
+                        '⚓️ Past Roles': str(past_roles_str),
+                        '⚓️ Work Experience (yrs)': str(work_experience),
+                        '⚓️ Education': str(education_str),
+                        '⚓️ embedding_summary': str(embedding_summary),
+                        '⚓️ Location': str(location)
                     }
                     
                     # Try updating only essential fields first to reduce failure chance
                     try:
                         simplified_data = {
-                            'embedding_summary': str(embedding_summary),
-                            'Current Role': str(current_role)
+                            '⚓️ embedding_summary': str(embedding_summary),
+                            '⚓️ Current Role': str(current_role)
                         }
                         table.update(record['id'], simplified_data)
                         return True, None
@@ -434,10 +375,10 @@ async def main():
     # Filter records that need processing
     has_raw_data = [
         r for r in records 
-        if r['fields'].get('Raw_Enriched_Data') and 
-        isinstance(r['fields'].get('Raw_Enriched_Data'), str) and
-        r['fields'].get('Raw_Enriched_Data').startswith('{"p') and  # Only valid JSON format
-        not r['fields'].get('embedding_summary')  # Only process if no embedding summary yet
+        if r['fields'].get('⚓️ Raw_Enriched_Data') and 
+        isinstance(r['fields'].get('⚓️ Raw_Enriched_Data'), str) and
+        r['fields'].get('⚓️ Raw_Enriched_Data').startswith('{"p') and  # Only valid JSON format
+        not r['fields'].get('⚓️ embedding_summary')  # Only process if no embedding summary yet
     ]
     
     # Log filtering results
