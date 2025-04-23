@@ -229,69 +229,136 @@ async def process_single_profile(linkedin_url: str) -> AsyncGenerator[str, None]
         # Step 3: Enrich with Proxy Curl
         yield "Enriching profile with Proxy Curl...\n"
         enriched_data = await enricher.enrich_profile(linkedin_url)
-        if not enriched_data or enriched_data in ["No LinkedIn URL provided", "LinkedIn profile not found (404)"]:
+        if not enriched_data or isinstance(enriched_data, str):
             yield "❌ Failed to enrich profile\n"
             raise HTTPException(status_code=400, detail="Failed to enrich profile")
         yield "✅ Profile enriched successfully\n"
 
-        # Step 4: Create Airtable record with raw data first
-        yield "Creating record in Airtable...\n"
-        airtable_record = table.create({
-            'linkedin_url': linkedin_url,
-            '⚓️ Raw_Enriched_Data': json.dumps(enriched_data)
-        })
-        yield f"✅ Created Airtable record: {airtable_record['id']}\n"
-
-        # Step 5: Generate embedding summary
-        yield "Generating embedding summary...\n"
-        embedding_summary = await generate_embedding_summary(openai_client, enriched_data)
-        
-        # Extract key data from enriched_data
-        location = enriched_data.get('location', '')
+        # Step 4: Extract data directly from the enriched data
+        yield "Extracting profile data...\n"
         
         # Extract current role
         current_role = ""
-        if enriched_data.get('job_title'):
+        if enriched_data.get('occupation'):
+            current_role = enriched_data.get('occupation')
+        elif enriched_data.get('headline'):
+            current_role = enriched_data.get('headline')
+        elif enriched_data.get('job_title'):
             current_role = enriched_data.get('job_title')
             if enriched_data.get('company'):
                 current_role += f" at {enriched_data.get('company')}"
+        elif enriched_data.get('experiences') and len(enriched_data.get('experiences')) > 0:
+            # Sort experiences by start date, most recent first
+            experiences = sorted(
+                [e for e in enriched_data.get('experiences') if e.get('starts_at')],
+                key=lambda x: (
+                    x['starts_at'].get('year', 0),
+                    x['starts_at'].get('month', 0) if x['starts_at'].get('month') else 0,
+                    x['starts_at'].get('day', 0) if x['starts_at'].get('day') else 0
+                ),
+                reverse=True
+            )
+            
+            if experiences:
+                current_exp = experiences[0]
+                title = current_exp.get('title', '')
+                company = current_exp.get('company', '')
+                if title and company:
+                    current_role = f"{title} at {company}"
+                elif title:
+                    current_role = title
+                elif company:
+                    current_role = f"Works at {company}"
         
-        # Get past companies
-        past_companies = []
-        if enriched_data.get('experiences') and len(enriched_data.get('experiences')) > 1:
-            for exp in enriched_data.get('experiences')[1:]:  # Skip first (current) role
-                if exp.get('company'):
-                    past_companies.append(exp.get('company'))
+        # Extract location
+        location = enriched_data.get('location', '')
+        if not location:
+            location_parts = []
+            if enriched_data.get('city'):
+                location_parts.append(enriched_data.get('city'))
+            if enriched_data.get('state'):
+                location_parts.append(enriched_data.get('state'))
+            if enriched_data.get('country_full_name'):
+                location_parts.append(enriched_data.get('country_full_name'))
+            elif enriched_data.get('country'):
+                location_parts.append(enriched_data.get('country'))
+            
+            if location_parts:
+                location = ", ".join(location_parts)
         
-        previous_companies = ", ".join(past_companies)
+        # Extract past roles
+        past_roles = []
+        if enriched_data.get('experiences'):
+            # Sort experiences by start date, most recent first
+            experiences = sorted(
+                [e for e in enriched_data.get('experiences') if e.get('starts_at')],
+                key=lambda x: (
+                    x['starts_at'].get('year', 0),
+                    x['starts_at'].get('month', 0) if x['starts_at'].get('month') else 0,
+                    x['starts_at'].get('day', 0) if x['starts_at'].get('day') else 0
+                ),
+                reverse=True
+            )
+            
+            # Skip first one if it's the current role
+            start_idx = 1 if len(experiences) > 1 else 0
+            
+            for exp in experiences[start_idx:]:
+                title = exp.get('title', '')
+                company = exp.get('company', '')
+                if title and company:
+                    past_roles.append(f"{title} at {company}")
+                elif title:
+                    past_roles.append(title)
+                elif company:
+                    past_roles.append(f"Worked at {company}")
+        
+        previous_companies = ", ".join(past_roles)
+        
+        # Step 5: Create record in Airtable with raw data first
+        yield "Creating record in Airtable...\n"
+        airtable_record = table.create({
+            'linkedin_url': linkedin_url,
+            'Raw_Enriched_Data': json.dumps(enriched_data),
+            'Current Role': current_role,
+            'Location': location,
+            'Past Roles': previous_companies
+        })
+        record_id = airtable_record['id']
+        yield f"✅ Created Airtable record with extracted data\n"
+
+        # Step 6: Generate embedding summary
+        yield "Generating embedding summary...\n"
+        embedding_summary = await generate_embedding_summary(openai_client, enriched_data)
         
         if embedding_summary:
-            # Update the record with extracted and generated data
-            table.update(airtable_record['id'], {
-                '⚓️ embedding_summary': embedding_summary,
-                '⚓️ Location': location,
-                '⚓️ Current Roles': current_role,
-                '⚓️ Past Roles': previous_companies
+            # Update the record with the embedding summary
+            table.update(record_id, {
+                'embedding_summary': embedding_summary
             })
-            yield "✅ Profile analysis complete\n"
+            yield "✅ Added embedding summary\n"
         else:
             yield "⚠️ Could not generate embedding summary\n"
 
-        # Step 6: Create embedding
+        # Step 7: Create vector embedding
         yield "Creating vector embedding...\n"
-        text = embedder.prepare_text_for_embedding(airtable_record)
-        if text:
-            embedding = await embedder.get_embedding(text)
-            metadata = embedder.prepare_metadata(airtable_record)
-            if embedding and metadata:
-                embedder.pinecone_index.upsert(
-                    vectors=[(airtable_record['id'], embedding, metadata)]
-                )
-                yield "✅ Embedding created and stored\n"
+        try:
+            text = embedder.prepare_text_for_embedding(airtable_record)
+            if text:
+                embedding = await embedder.get_embedding(text)
+                metadata = embedder.prepare_metadata(airtable_record)
+                if embedding and metadata:
+                    embedder.pinecone_index.upsert(
+                        vectors=[(record_id, embedding, metadata)]
+                    )
+                    yield "✅ Embedding created and stored\n"
+                else:
+                    yield "⚠️ Could not create embedding metadata\n"
             else:
-                yield "⚠️ Could not create embedding metadata\n"
-        else:
-            yield "⚠️ Could not prepare text for embedding\n"
+                yield "⚠️ Could not prepare text for embedding\n"
+        except Exception as e:
+            logging.error(f"Error creating embedding: {str(e)}")
+            yield f"⚠️ Error creating embedding: {str(e)}\n"
 
         # All done!
         yield "🎉 Profile processed successfully!\n"
