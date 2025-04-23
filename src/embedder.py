@@ -7,6 +7,7 @@ import os
 from pinecone import Pinecone
 import logging
 from dotenv import load_dotenv
+from pyairtable import Api
 
 
 load_dotenv()
@@ -17,7 +18,7 @@ class ProfileEmbedder:
     def __init__(self):
         self.openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-        self.pinecone_index = pc.Index(os.getenv("PINECONE_INDEX_NAME"))
+        self.pinecone_index = pc.Index(os.getenv("PINECONE_INDEX"))
     
     def prepare_text_for_embedding(self, profile):
         """Prepare comprehensive text for embedding"""
@@ -62,29 +63,24 @@ class ProfileEmbedder:
 
             # Get basic profile info
             name = raw_data.get('full_name', '')
-            current_title = experiences[0].get('title', '') if experiences else ''
-            current_company = experiences[0].get('company', '') if experiences else ''
             headline = raw_data.get('headline', '')
             location = f"{raw_data.get('city', '')} {raw_data.get('state', '')} {raw_data.get('country', '')}".strip()
             summary = raw_data.get('summary', '')
-            ai_summary = profile.get('fields', {}).get('AI_Summary', '')
-            tags = profile.get('fields', {}).get('Persona Tags (Filter Field)', '')
-            events = profile.get('fields', {}).get('⚡️🗓 All Events Attended', '')
+            embedding_summary = raw_data.get('embedding_summary', '')
+            current_role = profile.get('fields', {}).get('Current Role', '')
+            past_roles = profile.get('fields', {}).get('Past Roles', '')
+            tags = raw_data.get('Persona Tags (Filter Field)', '')
+            events = raw_data.get('⚡️🗓 All Events Attended', '')
 
             # Build final text
             sections = [
-                f"Name: {name}",
-                f"Current Position: {current_title} at {current_company}",
+                f"Current Position: {current_role}",
+                f"Past Roles: {past_roles}",
                 f"Headline: {headline}",
                 f"Location: {location}",
-                "",
-                "Experience History:",
-                "----------------------------------------",
-                "\n----------------------------------------\n".join(experience_details),
-                "----------------------------------------",
-                "",
+                f"Experience History: {experience_details}",
                 f"LinkedIn Summary: {summary}",
-                f"AI Analysis: {ai_summary}",
+                f"AI Analysis: {embedding_summary}",
                 f"Primary Tags: {tags}",
                 f"Events: {events}"
             ]
@@ -179,16 +175,80 @@ async def run_embedder():
     all_records = table.all()
     print(f"Found {len(all_records)} total records")
     
-    # Filter for new records with valid data
-    new_records = [
+    # Debug: Check record structure
+    if all_records:
+        print("\nSample record fields:")
+        sample_record = all_records[0]
+        print(f"Record ID: {sample_record['id']}")
+        print(f"Field names: {', '.join(sample_record.get('fields', {}).keys())}")
+        
+        # Count records with each field 
+        has_raw_data = sum(1 for r in all_records if r.get('fields', {}).get('Raw_Enriched_Data'))
+        has_ai_summary = sum(1 for r in all_records if r.get('fields', {}).get('AI_Summary'))
+        has_error_msg = sum(1 for r in all_records if r.get('fields', {}).get('Raw_Enriched_Data') in [
+            "No LinkedIn URL provided", "LinkedIn profile not found (404)"
+        ])
+        
+        print(f"\nValidation stats:")
+        print(f"Records with Raw_Enriched_Data: {has_raw_data}/{len(all_records)}")
+        print(f"Records with AI_Summary: {has_ai_summary}/{len(all_records)}")
+        print(f"Records with error messages: {has_error_msg}/{len(all_records)}")
+    
+    # Print 10 sample embedding texts from any records, even if they might have issues
+    print("\n=== SAMPLE EMBEDDING TEXTS (FROM ANY RECORDS) ===")
+    
+    sample_count = min(10, len(all_records))
+    samples_shown = 0
+    
+    # First try to get a few valid records
+    for record in all_records:
+        if samples_shown >= sample_count:
+            break
+            
+        text = None
+        try:
+            # Skip minimal validation - just make sure there's something in Raw_Enriched_Data
+            if record.get('fields', {}).get('Raw_Enriched_Data'):
+                text = embedder.prepare_text_for_embedding(record)
+        except Exception as e:
+            print(f"Error preparing text for record {record.get('id')}: {e}")
+            
+        if text:
+            is_in_pinecone = record['id'] in existing_ids
+            print(f"\nSAMPLE #{samples_shown+1} (Record ID: {record['id']}, Already in Pinecone: {is_in_pinecone}):")
+            print("="*50)
+            print(text[:500] + "..." if len(text) > 500 else text)  # Print first 500 chars
+            print("="*50)
+            samples_shown += 1
+    
+    if samples_shown == 0:
+        print("Could not generate text for ANY records! There might be an issue with the field names or data format.")
+        
+        # Show raw data from first record as a last resort
+        if all_records:
+            print("\nRaw data from first record:")
+            print(json.dumps(all_records[0].get('fields', {}), indent=2)[:1000])
+    
+    # Ask for confirmation
+    confirmation = input("\nDo you want to continue with the embedding process? (y/n): ")
+    if confirmation.lower() != 'y':
+        print("Embedding process cancelled.")
+        return
+    
+    # Filter for new records with valid data for actual processing
+    valid_records = [
         record for record in all_records 
-        if record['id'] not in existing_ids
-        and record.get('fields', {}).get('Raw_Enriched_Data')
+        if record.get('fields', {}).get('Raw_Enriched_Data')
         and record['fields']['Raw_Enriched_Data'] not in [
-            "No LinkedIn URL provided",
+            "No LinkedIn URL provided", 
             "LinkedIn profile not found (404)"
         ]
         and record.get('fields', {}).get('AI_Summary')
+    ]
+    
+    new_records = [
+        record for record in valid_records 
+        if record['id'] not in existing_ids
     ]
     
     print(f"Found {len(new_records)} new records to embed")
