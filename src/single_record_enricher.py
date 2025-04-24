@@ -70,7 +70,7 @@ async def enrich_single_profile(linkedin_url: str):
         # Check if profile exists
         logging.info("Checking if profile exists...")
         try:
-            records = table.all(formula=f"{{⚓️ LinkedIn URL}} = '{linkedin_url}'")
+            records = table.all(formula=f"{{linkedin_url}} = '{linkedin_url}'")
             if records:
                 logging.info("⚠️ Profile already exists in database")
                 return records[0]['id']

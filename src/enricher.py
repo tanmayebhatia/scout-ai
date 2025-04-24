@@ -114,14 +114,14 @@ class LinkedInEnricher:
         # Filter for records with LinkedIn URL but no raw enrichment
         to_enrich = [
             record for record in records 
-            if record['fields'].get('LinkedIn URL') and not record['fields'].get('Raw Enrichment')
+            if record['fields'].get('linkedin_url') and not record['fields'].get('Raw Enrichment')
         ]
         
         print(f"Found {len(to_enrich)} profiles to enrich")
         
         # Enrich each profile
         for record in tqdm(to_enrich):
-            linkedin_url = record['fields']['LinkedIn URL']
+            linkedin_url = record['fields']['linkedin_url']
             enriched_data = self.enrich_profile(linkedin_url)
             
             if enriched_data:
