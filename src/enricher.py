@@ -17,23 +17,67 @@ class LinkedInEnricher:
     def __init__(self):
         self.rate_limiter = RateLimit(limit=200, interval=60)
         self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.proxy_curl_key = os.getenv("PROXY_CURL_API_KEY")
+        self.proxy_curl_key = os.getenv("PROXYCURL_API_KEY")
     
     def is_valid_profile_url(self, url):
-        """Check if URL is a valid LinkedIn profile URL"""
+        """
+        Check if the URL is a valid LinkedIn profile URL
+        Accepts URLs with or without protocol (http/https)
+        Handles various LinkedIn URL formats
+        """
         if not url:
             return False
         
-        # More flexible pattern for LinkedIn profile URLs
-        profile_pattern = r'https?://(?:www\.)?linkedin\.com/in/[\w\-%.]+/?'
-        return bool(re.match(profile_pattern, url))
+        # Trim whitespace
+        url = url.strip()
+        
+        # Normalize URL by adding https:// if needed
+        normalized_url = url
+        if not url.startswith('http://') and not url.startswith('https://'):
+            normalized_url = 'https://' + url
+        
+        # Try to normalize URLs missing /in/ path
+        if re.search(r'linkedin\.com/[^/]+$', normalized_url, re.IGNORECASE):
+            # This matches patterns like linkedin.com/username (missing /in/)
+            username = normalized_url.split('/')[-1]
+            normalized_url = re.sub(r'(linkedin\.com)/[^/]+$', r'\1/in/' + username, normalized_url, flags=re.IGNORECASE)
+        
+        # Also handle linkedin/username format (missing .com)
+        if re.search(r'linkedin/[^/]+$', normalized_url, re.IGNORECASE):
+            username = normalized_url.split('/')[-1]
+            normalized_url = re.sub(r'(linkedin)/[^/]+$', r'linkedin.com/in/' + username, normalized_url, flags=re.IGNORECASE)
+        
+        # Basic pattern validation with more flexibility
+        # Allow both linkedin.com/in/username and linkedin.com/username
+        pattern = r'https?:\/\/(www\.)?(linkedin\.com\/(in\/)?[\w\-_%]+)\/?.*$'
+        return bool(re.match(pattern, normalized_url, re.IGNORECASE))
     
     async def enrich_profile(self, linkedin_url: str):
         """Enrich a LinkedIn profile URL using Proxy Curl"""
         try:
+            # Trim whitespace
+            if linkedin_url:
+                linkedin_url = linkedin_url.strip()
+            
             if not self.is_valid_profile_url(linkedin_url):
-                return "No LinkedIn URL provided"
-                
+                return "Invalid LinkedIn URL"
+            
+            # Normalize URL for API call
+            normalized_url = linkedin_url
+            if not linkedin_url.startswith('http://') and not linkedin_url.startswith('https://'):
+                normalized_url = 'https://' + linkedin_url
+            
+            # Try to normalize URLs missing /in/ path
+            if re.search(r'linkedin\.com/[^/]+$', normalized_url, re.IGNORECASE):
+                # This matches patterns like linkedin.com/username (missing /in/)
+                username = normalized_url.split('/')[-1]
+                normalized_url = re.sub(r'(linkedin\.com)/[^/]+$', r'\1/in/' + username, normalized_url, flags=re.IGNORECASE)
+            
+            # Also handle linkedin/username format (missing .com)
+            if re.search(r'linkedin/[^/]+$', normalized_url, re.IGNORECASE):
+                username = normalized_url.split('/')[-1]
+                normalized_url = re.sub(r'(linkedin)/[^/]+$', r'linkedin.com/in/' + username, normalized_url, flags=re.IGNORECASE)
+            
             headers = {
                 'Authorization': f'Bearer {self.proxy_curl_key}'
             }
@@ -42,15 +86,24 @@ class LinkedInEnricher:
                 async with session.get(
                     f'https://nubela.co/proxycurl/api/v2/linkedin',
                     headers=headers,
-                    params={'url': linkedin_url}
+                    params={'url': normalized_url}
                 ) as response:
                     if response.status == 404:
-                        return "LinkedIn profile not found (404)"
+                        return "404 error, LinkedIn not found"
+                    elif response.status == 401:
+                        return "401 error, LinkedIn not found"
+                    elif response.status != 200:
+                        return f"API error: Status {response.status}"
                     return await response.json()
                     
         except Exception as e:
-            logging.error(f"Error enriching profile {linkedin_url}: {str(e)}")
-            return None
+            error_str = str(e)
+            logging.error(f"Error enriching profile {linkedin_url}: {error_str}")
+            if "401" in error_str:
+                return "401 error, LinkedIn not found"
+            elif "404" in error_str:
+                return "404 error, LinkedIn not found"
+            return f"Error: {error_str}"
 
     async def analyze_with_openai_async(self, client, profile_data):
         """Analyze profile with OpenAI asynchronously"""

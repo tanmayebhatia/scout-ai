@@ -420,7 +420,7 @@ async def main():
             batch = to_analyze[i:i + batch_size]
             print(f"\nProcessing batch {i//batch_size + 1} of {total_batches}")
             print(f"Batch size: {len(batch)} records")
-            
+                
             successful, failed = await process_batch(table, openai_client, batch, sem)
             total_successful += successful
             total_failed += failed
