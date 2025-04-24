@@ -237,7 +237,7 @@ def extract_fields_from_enriched_data(enriched_data: Dict[str, Any], linkedin_ur
         
         # Add LinkedIn URL if provided
         if linkedin_url:
-            extracted['⚓️ LinkedIn URL'] = linkedin_url
+            extracted['linkedin_url'] = linkedin_url
             
         # Get name for record
         name = enriched_data.get('full_name', '')
