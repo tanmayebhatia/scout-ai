@@ -221,7 +221,7 @@ async def process_single_profile(linkedin_url: str) -> AsyncGenerator[str, None]
 
         # Step 2: Check if URL exists
         yield "Checking if profile exists in database...\n"
-        records = table.all(formula=f"{{⚓️ LinkedIn URL}} = '{linkedin_url}'")
+        records = table.all(formula=f"{{linkedin_url}} = '{linkedin_url}'")
         if records:
             yield "⚠️ Profile already exists in database\n"
             return
