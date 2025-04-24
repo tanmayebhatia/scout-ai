@@ -10,6 +10,7 @@ import os
 from asyncio import Semaphore
 from dotenv import load_dotenv
 import re
+from src.utils import extract_fields_from_enriched_data
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -282,65 +283,83 @@ async def process_batch(table, client, batch, sem):
     async def process_single_record(record):
         async with sem:  # Use semaphore to control concurrency
             try:
-                # Check if Raw_Enriched_Data is a string (likely JSON)
-                raw_data = record['fields'].get('Raw_Enriched_Data', '')
+                # Check if Raw_Enriched_Data exists
+                raw_data = record['fields'].get('⚓️ Raw_Enriched_Data', '')
                 
-                # Verify that this is properly formatted JSON data starting with {"p
-                if not raw_data or not isinstance(raw_data, str) or not raw_data.startswith('{"p'):
-                    print(f"Skipping record {record['id']}: Invalid Raw_Enriched_Data format")
-                    return False, "Invalid Raw_Enriched_Data format"
+                # Verify it's a string containing JSON data (starts with "{")
+                if not raw_data or not isinstance(raw_data, str) or not raw_data.startswith('{'):
+                    print(f"Skipping record {record['id']}: Missing JSON data in ⚓️ Raw_Enriched_Data")
+                    return False, "Missing JSON data in ⚓️ Raw_Enriched_Data"
                 
-                # Parse JSON
+                # Try to parse JSON
+                enriched_data = None
                 try:
                     enriched_data = json.loads(raw_data)
-                except json.JSONDecodeError:
-                    print(f"Skipping record {record['id']}: Invalid JSON in Raw_Enriched_Data")
-                    return False, "Invalid JSON in Raw_Enriched_Data"
+                    print(f"Successfully parsed JSON for record {record['id']}")
+                except Exception as e:
+                    print(f"Error parsing JSON for record {record['id']}: {str(e)}")
+                    print(f"Raw data sample: {raw_data[:100]}...")
+                    return False, f"JSON parsing error: {str(e)}"
                 
-                # Extract data without ChatGPT (minimize data preparation time)
-                current_role = extract_current_role(enriched_data)
-                past_roles = extract_past_roles(enriched_data)
-                work_experience = calculate_work_experience(enriched_data)
-                education = extract_education(enriched_data)
-                location = extract_location(enriched_data)
-                
-                # Generate embedding summary with GPT-3.5 (faster than GPT-4)
-                embedding_summary = await generate_embedding_summary(client, enriched_data)
-                
-                if embedding_summary:
-                    # Convert everything to strings to avoid data type issues
-                    past_roles_str = ", ".join(past_roles[:5]) if past_roles else ""  # Limit to first 5
-                    education_str = ", ".join(education) if education else ""
+                # Only proceed if we have valid enriched data
+                if enriched_data:
+                    # Extract all fields from enriched data
+                    print(f"Extracting fields for record {record['id']}")
+                    extracted_fields = extract_fields_from_enriched_data(enriched_data)
                     
-                    # Prepare data for Airtable update, all as strings
-                    airtable_data = {
-                        '⚓️ Current Roles': str(current_role),
-                        '⚓️ Past Roles': str(past_roles_str),
-                        '⚓️ Work Experience (yrs)': str(work_experience),
-                        '⚓️ Education': str(education_str),
-                        '⚓️ embedding_summary': str(embedding_summary),
-                        '⚓️ Location': str(location)
-                    }
+                    if not extracted_fields:
+                        print(f"Failed to extract fields for record {record['id']}")
+                        return False, "Field extraction failed"
+                        
+                    # Generate embedding summary with GPT-3.5
+                    print(f"Generating embedding for record {record['id']}")
+                    embedding_summary = await generate_embedding_summary(client, enriched_data)
                     
-                    # Try updating only essential fields first to reduce failure chance
+                    if embedding_summary:
+                        # Add embedding summary to extracted fields
+                        extracted_fields['⚓️ embedding_summary'] = embedding_summary
+                    
+                    # Ensure these fields are included in the update if they were extracted
+                    important_fields = [
+                        '⚓️ Current Roles',
+                        '⚓️ Past Roles',
+                        '⚓️ Location',
+                        '⚓️ Education',
+                        '⚓️ Work Experience (yrs)',
+                        '⚓️ embedding_summary',
+                        '⚓️ Raw_Enriched_Data'
+                    ]
+                    
+                    # Filter update_data to only include fields in important_fields
+                    update_data = {k: v for k, v in extracted_fields.items() if k in important_fields and v}
+                    
+                    # Log which fields are being updated
+                    print(f"Updating record {record['id']} with fields: {', '.join(update_data.keys())}")
+                    
+                    # Check if any important fields are missing
+                    missing_fields = [f for f in important_fields if f not in update_data]
+                    if missing_fields:
+                        print(f"Warning: Missing fields in update: {', '.join(missing_fields)}")
+                    
+                    # Update the record with all extracted fields
                     try:
-                        simplified_data = {
-                            '⚓️ embedding_summary': str(embedding_summary),
-                            '⚓️ Current Roles': str(current_role)
-                        }
-                        table.update(record['id'], simplified_data)
-                        return True, None
+                        if update_data:
+                            table.update(record['id'], update_data)
+                            print(f"Successfully updated record {record['id']} with {len(update_data)} fields")
+                            return True, None
+                        else:
+                            print(f"No fields to update for record {record['id']}")
+                            return False, "No fields to update"
                     except Exception as e:
-                        logging.error(f"Airtable update failed for record {record['id']}")
-                        logging.error(f"Error details: {str(e)}")
-                        return False, e
+                        print(f"Error updating record {record['id']}: {str(e)}")
+                        return False, f"Airtable update error: {str(e)}"
                 else:
-                    logging.error(f"Failed to generate embedding summary for record {record['id']}")
-                    return False, "No embedding summary generated"
+                    print(f"No valid enriched data for record {record['id']}")
+                    return False, "No valid enriched data"
                     
             except Exception as e:
-                logging.error(f"Error processing record {record['id']}: {str(e)}")
-                return False, e
+                print(f"Unexpected error processing record {record['id']}: {str(e)}")
+                return False, f"Unexpected error: {str(e)}"
     
     # Process all records in parallel but controlled by semaphore
     results = await asyncio.gather(
@@ -377,7 +396,7 @@ async def main():
         r for r in records 
         if r['fields'].get('⚓️ Raw_Enriched_Data') and 
         isinstance(r['fields'].get('⚓️ Raw_Enriched_Data'), str) and
-        r['fields'].get('⚓️ Raw_Enriched_Data').startswith('{"p') and  # Only valid JSON format
+        r['fields'].get('⚓️ Raw_Enriched_Data').startswith('{') and  # Only valid JSON format
         not r['fields'].get('⚓️ embedding_summary')  # Only process if no embedding summary yet
     ]
     

@@ -5,7 +5,7 @@ from pyairtable import Api
 from tqdm import tqdm
 from tqdm.asyncio import tqdm_asyncio
 from src.enricher import LinkedInEnricher
-from src.utils import setup_logging, parse_openai_response
+from src.utils import setup_logging, parse_openai_response, extract_fields_from_enriched_data
 from src.embedder import ProfileEmbedder
 from src.analyze_enriched_records import generate_embedding_summary
 import asyncio
@@ -97,7 +97,7 @@ async def analyze_profile_async(client, enricher, record, semaphore):
     async with semaphore:
         for attempt in range(max_retries):
             try:
-                raw_data = json.loads(record['fields']['Raw_Enriched_Data'])
+                raw_data = json.loads(record['fields']['⚓️ Raw_Enriched_Data'])
                 analysis = await enricher.analyze_with_openai_async(client, raw_data)
                 
                 if analysis:
@@ -105,9 +105,9 @@ async def analyze_profile_async(client, enricher, record, semaphore):
                     return {
                         'id': record['id'],
                         'fields': {
-                            'Previous_Companies': companies,
-                            'AI_Summary': summary,
-                            'Location': location
+                            '⚓️ Past Roles': companies,
+                            '⚓️ embedding_summary': summary,
+                            '⚓️ Location': location
                         }
                     }
                 break
@@ -133,18 +133,18 @@ async def analyze_profiles_async(table, batch_size=50, max_records=None):
     print(f"\nTotal records: {len(all_records)}")
     
     # Debug counts
-    has_raw_data = [r for r in all_records if 'Raw_Enriched_Data' in r['fields']]
-    has_ai_summary = [r for r in all_records if 'AI_Summary' in r['fields']]
-    has_companies = [r for r in all_records if 'Previous_Companies' in r['fields']]
+    has_raw_data = [r for r in all_records if '⚓️ Raw_Enriched_Data' in r['fields']]
+    has_ai_summary = [r for r in all_records if '⚓️ embedding_summary' in r['fields']]
+    has_companies = [r for r in all_records if '⚓️ Past Roles' in r['fields']]
     
-    print(f"Records with Raw_Enriched_Data: {len(has_raw_data)}")
-    print(f"Records with AI_Summary: {len(has_ai_summary)}")
-    print(f"Records with Previous_Companies: {len(has_companies)}")
+    print(f"Records with ⚓️ Raw_Enriched_Data: {len(has_raw_data)}")
+    print(f"Records with ⚓️ embedding_summary: {len(has_ai_summary)}")
+    print(f"Records with ⚓️ Past Roles: {len(has_companies)}")
     
     to_analyze = [
         record for record in all_records
-        if 'Raw_Enriched_Data' in record['fields']
-        and ('AI_Summary' not in record['fields'] or 'Previous_Companies' not in record['fields'])
+        if '⚓️ Raw_Enriched_Data' in record['fields']
+        and ('⚓️ embedding_summary' not in record['fields'] or '⚓️ Past Roles' not in record['fields'])
     ]
     
     print(f"\nFound {len(to_analyze)} profiles to analyze")
@@ -221,7 +221,7 @@ async def process_single_profile(linkedin_url: str) -> AsyncGenerator[str, None]
 
         # Step 2: Check if URL exists
         yield "Checking if profile exists in database...\n"
-        records = table.all(formula=f"{{linkedin_url}} = '{linkedin_url}'")
+        records = table.all(formula=f"{{⚓️ LinkedIn URL}} = '{linkedin_url}'")
         if records:
             yield "⚠️ Profile already exists in database\n"
             return
@@ -234,96 +234,14 @@ async def process_single_profile(linkedin_url: str) -> AsyncGenerator[str, None]
             raise HTTPException(status_code=400, detail="Failed to enrich profile")
         yield "✅ Profile enriched successfully\n"
 
-        # Step 4: Extract data directly from the enriched data
+        # Step 4: Extract data directly from the enriched data using the utility function
         yield "Extracting profile data...\n"
+        extracted_fields = extract_fields_from_enriched_data(enriched_data, linkedin_url)
+        yield f"✅ Extracted {len(extracted_fields)} fields from profile\n"
         
-        # Extract current role
-        current_role = ""
-        if enriched_data.get('occupation'):
-            current_role = enriched_data.get('occupation')
-        elif enriched_data.get('headline'):
-            current_role = enriched_data.get('headline')
-        elif enriched_data.get('job_title'):
-            current_role = enriched_data.get('job_title')
-            if enriched_data.get('company'):
-                current_role += f" at {enriched_data.get('company')}"
-        elif enriched_data.get('experiences') and len(enriched_data.get('experiences')) > 0:
-            # Sort experiences by start date, most recent first
-            experiences = sorted(
-                [e for e in enriched_data.get('experiences') if e.get('starts_at')],
-                key=lambda x: (
-                    x['starts_at'].get('year', 0),
-                    x['starts_at'].get('month', 0) if x['starts_at'].get('month') else 0,
-                    x['starts_at'].get('day', 0) if x['starts_at'].get('day') else 0
-                ),
-                reverse=True
-            )
-            
-            if experiences:
-                current_exp = experiences[0]
-                title = current_exp.get('title', '')
-                company = current_exp.get('company', '')
-                if title and company:
-                    current_role = f"{title} at {company}"
-                elif title:
-                    current_role = title
-                elif company:
-                    current_role = f"Works at {company}"
-        
-        # Extract location
-        location = enriched_data.get('location', '')
-        if not location:
-            location_parts = []
-            if enriched_data.get('city'):
-                location_parts.append(enriched_data.get('city'))
-            if enriched_data.get('state'):
-                location_parts.append(enriched_data.get('state'))
-            if enriched_data.get('country_full_name'):
-                location_parts.append(enriched_data.get('country_full_name'))
-            elif enriched_data.get('country'):
-                location_parts.append(enriched_data.get('country'))
-            
-            if location_parts:
-                location = ", ".join(location_parts)
-        
-        # Extract past roles
-        past_roles = []
-        if enriched_data.get('experiences'):
-            # Sort experiences by start date, most recent first
-            experiences = sorted(
-                [e for e in enriched_data.get('experiences') if e.get('starts_at')],
-                key=lambda x: (
-                    x['starts_at'].get('year', 0),
-                    x['starts_at'].get('month', 0) if x['starts_at'].get('month') else 0,
-                    x['starts_at'].get('day', 0) if x['starts_at'].get('day') else 0
-                ),
-                reverse=True
-            )
-            
-            # Skip first one if it's the current role
-            start_idx = 1 if len(experiences) > 1 else 0
-            
-            for exp in experiences[start_idx:]:
-                title = exp.get('title', '')
-                company = exp.get('company', '')
-                if title and company:
-                    past_roles.append(f"{title} at {company}")
-                elif title:
-                    past_roles.append(title)
-                elif company:
-                    past_roles.append(f"Worked at {company}")
-        
-        previous_companies = ", ".join(past_roles)
-        
-        # Step 5: Create record in Airtable with raw data first
+        # Step 5: Create record in Airtable with extracted data
         yield "Creating record in Airtable...\n"
-        airtable_record = table.create({
-            'linkedin_url': linkedin_url,
-            'Raw_Enriched_Data': json.dumps(enriched_data),
-            'Current Role': current_role,
-            'Location': location,
-            'Past Roles': previous_companies
-        })
+        airtable_record = table.create(extracted_fields)
         record_id = airtable_record['id']
         yield f"✅ Created Airtable record with extracted data\n"
 
@@ -334,7 +252,7 @@ async def process_single_profile(linkedin_url: str) -> AsyncGenerator[str, None]
         if embedding_summary:
             # Update the record with the embedding summary
             table.update(record_id, {
-                'embedding_summary': embedding_summary
+                '⚓️ embedding_summary': embedding_summary
             })
             yield "✅ Added embedding summary\n"
         else:

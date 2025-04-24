@@ -23,17 +23,17 @@ class ProfileEmbedder:
     def prepare_text_for_embedding(self, profile):
         """Prepare comprehensive text for embedding"""
         try:
-            raw_data_str = profile.get('fields', {}).get('Raw_Enriched_Data', '{}')
+            raw_data_str = profile.get('fields', {}).get('⚓️ Raw_Enriched_Data', '{}')
             
             # Skip if it's one of our error messages
             if raw_data_str in ["No LinkedIn URL provided", "LinkedIn profile not found (404)"]:
-                logging.info(f"Skipping record {profile.get('id')} - error message in Raw_Enriched_Data")
+                logging.info(f"Skipping record {profile.get('id')} - error message in ⚓️ Raw_Enriched_Data")
                 return None
             
             try:
                 raw_data = json.loads(raw_data_str)
             except json.JSONDecodeError:
-                logging.error(f"Invalid JSON in Raw_Enriched_Data for record {profile.get('id')}")
+                logging.error(f"Invalid JSON in ⚓️ Raw_Enriched_Data for record {profile.get('id')}")
                 logging.error(f"Raw data: {raw_data_str[:200]}")
                 return None
             
@@ -66,9 +66,9 @@ class ProfileEmbedder:
             headline = raw_data.get('headline', '')
             location = f"{raw_data.get('city', '')} {raw_data.get('state', '')} {raw_data.get('country', '')}".strip()
             summary = raw_data.get('summary', '')
-            embedding_summary = raw_data.get('embedding_summary', '')
-            current_role = profile.get('fields', {}).get('Current Role', '')
-            past_roles = profile.get('fields', {}).get('Past Roles', '')
+            embedding_summary = raw_data.get('⚓️ embedding_summary', '')
+            current_role = profile.get('fields', {}).get('⚓️ Current Roles', '')
+            past_roles = profile.get('fields', {}).get('⚓️ Past Roles', '')
             tags = raw_data.get('Persona Tags (Filter Field)', '')
             events = raw_data.get('⚡️🗓 All Events Attended', '')
 
@@ -132,7 +132,7 @@ class ProfileEmbedder:
     def prepare_metadata(self, profile):
         """Prepare metadata for Pinecone with validation"""
         try:
-            raw_data = json.loads(profile.get('fields', {}).get('Raw_Enriched_Data', '{}'))
+            raw_data = json.loads(profile.get('fields', {}).get('⚓️ Raw_Enriched_Data', '{}'))
             experiences = raw_data.get('experiences', [{}])
             current_company = experiences[0].get('company', '') if experiences else ''
             fields = profile.get('fields', {})
@@ -145,8 +145,8 @@ class ProfileEmbedder:
                 'current_company': current_company or 'No current company',
                 'location': f"{raw_data.get('city', '')} {raw_data.get('state', '')} {raw_data.get('country', '')}".strip() or 'No location',
                 'linkedin_url': raw_data.get('public_identifier', '') or 'No URL',
-                'ai_summary': fields.get('AI_Summary', 'No summary'),
-                'companies': fields.get('Previous_Companies', 'No companies'),
+                'ai_summary': fields.get('⚓️ embedding_summary', 'No summary'),
+                'companies': fields.get('⚓️ Past Roles', 'No companies'),
                 'persona_tags': fields.get('Persona Tags (Filter Field)', 'No tags'),
                 'events_attended': fields.get('⚡️🗓 All Events Attended', 'No events'),
                 'email': profile.get('fields', {}).get('Email', 'email not available')
@@ -183,15 +183,15 @@ async def run_embedder():
         print(f"Field names: {', '.join(sample_record.get('fields', {}).keys())}")
         
         # Count records with each field 
-        has_raw_data = sum(1 for r in all_records if r.get('fields', {}).get('Raw_Enriched_Data'))
-        has_ai_summary = sum(1 for r in all_records if r.get('fields', {}).get('AI_Summary'))
-        has_error_msg = sum(1 for r in all_records if r.get('fields', {}).get('Raw_Enriched_Data') in [
+        has_raw_data = sum(1 for r in all_records if r.get('fields', {}).get('⚓️ Raw_Enriched_Data'))
+        has_ai_summary = sum(1 for r in all_records if r.get('fields', {}).get('⚓️ embedding_summary'))
+        has_error_msg = sum(1 for r in all_records if r.get('fields', {}).get('⚓️ Raw_Enriched_Data') in [
             "No LinkedIn URL provided", "LinkedIn profile not found (404)"
         ])
         
         print(f"\nValidation stats:")
-        print(f"Records with Raw_Enriched_Data: {has_raw_data}/{len(all_records)}")
-        print(f"Records with AI_Summary: {has_ai_summary}/{len(all_records)}")
+        print(f"Records with ⚓️ Raw_Enriched_Data: {has_raw_data}/{len(all_records)}")
+        print(f"Records with ⚓️ embedding_summary: {has_ai_summary}/{len(all_records)}")
         print(f"Records with error messages: {has_error_msg}/{len(all_records)}")
     
     # Print 10 sample embedding texts from any records, even if they might have issues
@@ -208,7 +208,7 @@ async def run_embedder():
         text = None
         try:
             # Skip minimal validation - just make sure there's something in Raw_Enriched_Data
-            if record.get('fields', {}).get('Raw_Enriched_Data'):
+            if record.get('fields', {}).get('⚓️ Raw_Enriched_Data'):
                 text = embedder.prepare_text_for_embedding(record)
         except Exception as e:
             print(f"Error preparing text for record {record.get('id')}: {e}")
@@ -238,12 +238,12 @@ async def run_embedder():
     # Filter for new records with valid data for actual processing
     valid_records = [
         record for record in all_records 
-        if record.get('fields', {}).get('Raw_Enriched_Data')
-        and record['fields']['Raw_Enriched_Data'] not in [
+        if record.get('fields', {}).get('⚓️ Raw_Enriched_Data')
+        and record['fields']['⚓️ Raw_Enriched_Data'] not in [
             "No LinkedIn URL provided", 
             "LinkedIn profile not found (404)"
         ]
-        and record.get('fields', {}).get('AI_Summary')
+        and record.get('fields', {}).get('⚓️ embedding_summary')
     ]
     
     new_records = [
@@ -291,7 +291,7 @@ async def test_embedding():
     
     print("Fetching from Airtable...")
     try:
-        records = table.all(formula="NOT({Raw_Enriched_Data} = '')", max_records=1)
+        records = table.all(formula="NOT({⚓️ Raw_Enriched_Data} = '')", max_records=1)
         if records and len(records) > 0:
             record = records[0]
             
