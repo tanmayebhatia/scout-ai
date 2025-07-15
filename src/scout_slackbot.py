@@ -21,7 +21,15 @@ class ScoutSlackBot:
         
         # Initialize non-async clients
         self.slack_app = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN"))
-        self.openai_client = AsyncOpenAI()
+        
+        # Initialize OpenAI client with error handling
+        try:
+            self.openai_client = AsyncOpenAI()
+            self.logger.info("✅ OpenAI client initialized successfully")
+        except Exception as e:
+            self.logger.error(f"❌ Failed to initialize OpenAI client: {str(e)}")
+            self.logger.error("This may be due to httpx version compatibility issues")
+            self.openai_client = None
         
         # Initialize Pinecone
         self.pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
@@ -116,6 +124,10 @@ class ScoutSlackBot:
     
     async def get_embedding(self, text: str) -> List[float]:
         """Get OpenAI embedding for text"""
+        if not self.openai_client:
+            self.logger.error("OpenAI client not available - cannot generate embeddings")
+            raise Exception("OpenAI client not initialized")
+            
         response = await self.openai_client.embeddings.create(
             model="text-embedding-3-small",
             input=text

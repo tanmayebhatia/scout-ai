@@ -1,5 +1,6 @@
 aiohttp==3.10.5
 fastapi==0.115.0
+httpx==0.24.1
 openai==1.51.0
 pyairtable==2.3.3
 python-dotenv==1.0.1
