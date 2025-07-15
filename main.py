@@ -844,7 +844,7 @@ async def process_executive_search(
     roles: str = Form(...),  # JSON string of roles array
     min_experience: int = Form(7),
     location_filter: Optional[str] = Form(None),
-    results_per_company: int = Form(25),
+    results_per_company: int = Form(10),
     delay_seconds: int = Form(3)
 ):
     """Process executive search and return full results."""
@@ -971,17 +971,43 @@ def preview_executive_search_for_company(company_data, roles, min_experience, lo
     company_name = company_data['name']
     website_url = company_data.get('website', '')
     
-    # Build query similar to the main search
-    query_conditions = []
-    
-    # Try website first, then company name
+    # Try website search first
     if website_url:
         domain = extract_domain_from_url_api(website_url)
         if domain:
-            query_conditions.append({"term": {"job_company_website": domain}})
+            query_conditions = [{"term": {"job_company_website": domain}}]
+            
+            # Add role conditions
+            role_conditions = [{"match_phrase": {"job_title": role.lower()}} for role in roles]
+            query_conditions.append({"bool": {"should": role_conditions}})
+            
+            # Add experience filter
+            query_conditions.append({"range": {"inferred_years_experience": {"gte": min_experience}}})
+            
+            # Add location filter if provided
+            if location_filter:
+                query_conditions.append({"match": {"location_name": location_filter}})
+            
+            # Build the preview query
+            preview_query = {
+                "query": {
+                    "bool": {
+                        "must": query_conditions
+                    }
+                },
+                "size": 10
+            }
+            
+            resp = requests.post(API_URL, headers=headers, json=preview_query)
+            
+            if resp.status_code == 200:
+                result = resp.json()
+                website_count = result.get('total', 0)
+                if website_count > 0:
+                    return website_count
     
-    if not query_conditions:
-        query_conditions.append({"term": {"job_company_name": company_name.lower()}})
+    # Fall back to company name search
+    query_conditions = [{"term": {"job_company_name": company_name.lower()}}]
     
     # Add role conditions
     role_conditions = [{"match_phrase": {"job_title": role.lower()}} for role in roles]
@@ -994,14 +1020,14 @@ def preview_executive_search_for_company(company_data, roles, min_experience, lo
     if location_filter:
         query_conditions.append({"match": {"location_name": location_filter}})
     
-    # Build the preview query - size 0 to get only count
+    # Build the preview query
     preview_query = {
         "query": {
             "bool": {
                 "must": query_conditions
             }
         },
-        "size": 0  # Only get count, no actual results
+        "size": 10
     }
     
     resp = requests.post(API_URL, headers=headers, json=preview_query)
@@ -1025,17 +1051,42 @@ def search_executives_for_company_api(company_data, roles, min_experience, locat
     company_name = company_data['name']
     website_url = company_data.get('website', '')
     
-    # Build query conditions
-    query_conditions = []
-    
-    # Try website first, then company name
+    # Try website search first
     if website_url:
         domain = extract_domain_from_url_api(website_url)
         if domain:
-            query_conditions.append({"term": {"job_company_website": domain}})
+            query_conditions = [{"term": {"job_company_website": domain}}]
+            
+            # Add role conditions
+            role_conditions = [{"match_phrase": {"job_title": role.lower()}} for role in roles]
+            query_conditions.append({"bool": {"should": role_conditions}})
+            
+            # Add experience filter
+            query_conditions.append({"range": {"inferred_years_experience": {"gte": min_experience}}})
+            
+            # Add location filter if provided
+            if location_filter:
+                query_conditions.append({"match": {"location_name": location_filter}})
+            
+            # Build the search query
+            search_query = {
+                "query": {
+                    "bool": {
+                        "must": query_conditions
+                    }
+                },
+                "size": limit
+            }
+            
+            resp = requests.post(API_URL, headers=headers, json=search_query)
+            
+            if resp.status_code == 200:
+                result = resp.json()
+                if result.get('data') and len(result['data']) > 0:
+                    return extract_executives_from_pdl_response_api(result, company_name)
     
-    if not query_conditions:
-        query_conditions.append({"term": {"job_company_name": company_name.lower()}})
+    # Fall back to company name search
+    query_conditions = [{"term": {"job_company_name": company_name.lower()}}]
     
     # Add role conditions
     role_conditions = [{"match_phrase": {"job_title": role.lower()}} for role in roles]
