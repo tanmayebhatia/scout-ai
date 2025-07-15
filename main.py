@@ -1,27 +1,42 @@
+#!/usr/bin/env python3
+"""
+Scout AI - LinkedIn Profile Enrichment Service
+"""
+
 import argparse
-import logging
+import asyncio
+import aiohttp
+import csv
 import json
+import logging
+import os
+import requests
+import shutil
+import tempfile
+import threading
+import time
+import uuid
+import uvicorn
+from datetime import datetime
+from typing import AsyncGenerator, List, Optional, Dict, Any
+from urllib.parse import urlparse
+
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, UploadFile, File, Form
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from openai import AsyncOpenAI
+from pydantic import BaseModel
 from pyairtable import Api
 from tqdm import tqdm
 from tqdm.asyncio import tqdm_asyncio
+
 from src.enricher import LinkedInEnricher
 from src.utils import setup_logging, parse_openai_response, extract_fields_from_enriched_data
 from src.embedder import ProfileEmbedder
 from src.analyze_enriched_records import generate_embedding_summary
-import asyncio
-import aiohttp
-from openai import AsyncOpenAI
-import time
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
-from typing import AsyncGenerator
-from fastapi.middleware.cors import CORSMiddleware
 from src.single_record_enricher import enrich_single_profile
-import os
-import uvicorn
-from dotenv import load_dotenv
 from src.scout_slackbot import ScoutSlackBot
-import threading
 
 load_dotenv()
 
@@ -403,20 +418,40 @@ async def batch_process_profiles(batch_size: int = 10, max_concurrent: int = 5) 
         raw_data_field = "⚓️ Raw_Enriched_Data"
         embedding_field = "⚓️ embedding_summary"
         
+        # Fields that should be extracted from raw data
+        extracted_fields_to_check = [
+            "⚓️ Current Roles",
+            "⚓️ Past Roles", 
+            "⚓️ Location",
+            "⚓️ Education",
+            "⚓️ Work Experience (yrs)"
+        ]
+        
         for record in all_records:
             # Check if record has a LinkedIn URL
             linkedin_url = record.get('fields', {}).get(linkedin_url_field)
             
             # Check if Raw_Enriched_Data is missing or empty
             raw_data = record.get('fields', {}).get(raw_data_field, '')
-            needs_enrichment = False
+            needs_processing = False
             
             if linkedin_url:
-                # If URL exists, check if raw data is missing or empty
+                # Case 1: No raw data at all - needs full enrichment
                 if not raw_data:
-                    needs_enrichment = True
+                    needs_processing = True
+                # Case 2: Has raw data but missing extracted fields - needs field extraction
+                elif raw_data and raw_data.startswith('{'):
+                    # Check if any of the extracted fields are missing
+                    record_fields = record.get('fields', {})
+                    missing_extracted_fields = [
+                        field for field in extracted_fields_to_check 
+                        if field not in record_fields or not record_fields.get(field)
+                    ]
+                    
+                    if missing_extracted_fields:
+                        needs_processing = True
             
-            if needs_enrichment:
+            if needs_processing:
                 to_process.append((record['id'], linkedin_url))
         
         yield f"Found {len(to_process)} records needing enrichment\n"
@@ -736,6 +771,366 @@ async def startup_event():
 async def shutdown_event():
     await scout_bot.cleanup()
     print("🤖 Scout bot shutdown complete")
+
+@app.post("/api/exec-recruiting/preview")
+async def preview_executive_search(
+    csv_file: UploadFile = File(...),
+    roles: str = Form(...),  # JSON string of roles array
+    min_experience: int = Form(7),
+    location_filter: Optional[str] = Form(None)
+):
+    """Preview executive search to show total potential results without processing."""
+    
+    # Parse roles from JSON string
+    import json
+    try:
+        roles_list = json.loads(roles)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid roles format")
+    
+    # Save uploaded file temporarily
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmp_file:
+        shutil.copyfileobj(csv_file.file, tmp_file)
+        tmp_path = tmp_file.name
+    
+    try:
+        # Read companies from CSV
+        companies = read_companies_csv_for_recruiting(tmp_path)
+        
+        # Preview search for each company
+        preview_results = []
+        total_potential_executives = 0
+        
+        for company_data in companies:
+            try:
+                count = preview_executive_search_for_company(
+                    company_data, roles_list, min_experience, location_filter
+                )
+                preview_results.append({
+                    "company": company_data['name'],
+                    "website": company_data.get('website', ''),
+                    "potential_executives": count
+                })
+                total_potential_executives += count
+                
+                # Rate limiting for preview
+                time.sleep(1)
+                
+            except Exception as e:
+                preview_results.append({
+                    "company": company_data['name'],
+                    "website": company_data.get('website', ''),
+                    "potential_executives": 0,
+                    "error": str(e)
+                })
+        
+        return {
+            "success": True,
+            "summary": {
+                "companies_found": len(companies),
+                "total_potential_executives": total_potential_executives,
+                "average_per_company": round(total_potential_executives / len(companies), 1) if companies else 0
+            },
+            "company_breakdown": preview_results
+        }
+        
+    finally:
+        # Clean up temp file
+        os.unlink(tmp_path)
+
+@app.post("/api/exec-recruiting/process")
+async def process_executive_search(
+    csv_file: UploadFile = File(...),
+    roles: str = Form(...),  # JSON string of roles array
+    min_experience: int = Form(7),
+    location_filter: Optional[str] = Form(None),
+    results_per_company: int = Form(25),
+    delay_seconds: int = Form(3)
+):
+    """Process executive search and return full results."""
+    
+    # Parse roles from JSON string
+    import json
+    try:
+        roles_list = json.loads(roles)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid roles format")
+    
+    # Save uploaded file temporarily
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmp_file:
+        shutil.copyfileobj(csv_file.file, tmp_file)
+        tmp_path = tmp_file.name
+    
+    try:
+        # Read companies from CSV
+        companies = read_companies_csv_for_recruiting(tmp_path)
+        
+        # Process each company
+        all_executives = []
+        successful_companies = 0
+        
+        for i, company_data in enumerate(companies):
+            try:
+                executives = search_executives_for_company_api(
+                    company_data, roles_list, min_experience, location_filter, results_per_company
+                )
+                
+                if executives:
+                    all_executives.extend(executives)
+                    successful_companies += 1
+                
+                # Rate limiting
+                if i < len(companies) - 1:
+                    time.sleep(delay_seconds)
+                    
+            except Exception as e:
+                print(f"Error processing {company_data['name']}: {e}")
+                continue
+        
+        # Generate CSV file
+        session_id = str(uuid.uuid4())
+        csv_filename = f"executives_{session_id}.csv"
+        csv_path = f"/tmp/{csv_filename}"
+        
+        write_executives_to_csv_api(all_executives, csv_path)
+        
+        return {
+            "success": True,
+            "summary": {
+                "companies_processed": len(companies),
+                "companies_with_results": successful_companies,
+                "total_executives": len(all_executives),
+                "success_rate": round((successful_companies / len(companies)) * 100, 1) if companies else 0
+            },
+            "executives": all_executives,
+            "csv_download_url": f"/api/exec-recruiting/download/{session_id}"
+        }
+        
+    finally:
+        # Clean up temp file
+        os.unlink(tmp_path)
+
+@app.get("/api/exec-recruiting/download/{session_id}")
+async def download_executives_csv(session_id: str):
+    """Download the generated executives CSV file."""
+    csv_path = f"/tmp/executives_{session_id}.csv"
+    
+    if not os.path.exists(csv_path):
+        raise HTTPException(status_code=404, detail="File not found or expired")
+    
+    return FileResponse(
+        csv_path,
+        media_type='text/csv',
+        filename=f"executives_{session_id}.csv"
+    )
+
+# Helper functions for the new endpoints
+
+def read_companies_csv_for_recruiting(filename):
+    """Read company data from CSV file for recruiting API."""
+    companies = []
+    
+    with open(filename, 'r', encoding='utf-8-sig') as f:
+        reader = csv.DictReader(f)
+        
+        # Strip whitespace from column names and find relevant columns
+        headers = [col.strip() for col in reader.fieldnames if col and col.strip()]
+        name_columns = ['Company Name', 'company name', 'name', 'Name', 'company']
+        website_columns = ['Website', 'website', 'url', 'URL', 'Web']
+        
+        name_col = next((col for col in headers if col in name_columns), None)
+        website_col = next((col for col in headers if col in website_columns), None)
+        
+        if not name_col:
+            raise HTTPException(status_code=400, detail=f"No company name column found. Available columns: {headers}")
+        
+        for row in reader:
+            company_name = row.get(name_col, '').strip()
+            if not company_name:
+                continue
+                
+            company_data = {
+                'name': company_name,
+                'website': row.get(website_col, '').strip() if website_col and website_col in row else ''
+            }
+            
+            companies.append(company_data)
+    
+    return companies
+
+def preview_executive_search_for_company(company_data, roles, min_experience, location_filter):
+    """Preview search for executives at a company using PDL API."""
+    API_KEY = os.getenv("PDL_API_KEY")
+    
+    if not API_KEY:
+        raise Exception("PDL_API_KEY not found in environment variables")
+    
+    API_URL = "https://api.peopledatalabs.com/v5/person/search"
+    headers = {"X-Api-Key": API_KEY}
+    
+    company_name = company_data['name']
+    website_url = company_data.get('website', '')
+    
+    # Build query similar to the main search
+    query_conditions = []
+    
+    # Try website first, then company name
+    if website_url:
+        domain = extract_domain_from_url_api(website_url)
+        if domain:
+            query_conditions.append({"term": {"job_company_website": domain}})
+    
+    if not query_conditions:
+        query_conditions.append({"term": {"job_company_name": company_name.lower()}})
+    
+    # Add role conditions
+    role_conditions = [{"match_phrase": {"job_title": role.lower()}} for role in roles]
+    query_conditions.append({"bool": {"should": role_conditions}})
+    
+    # Add experience filter
+    query_conditions.append({"range": {"inferred_years_experience": {"gte": min_experience}}})
+    
+    # Add location filter if provided
+    if location_filter:
+        query_conditions.append({"match": {"location_name": location_filter}})
+    
+    # Build the preview query - size 0 to get only count
+    preview_query = {
+        "query": {
+            "bool": {
+                "must": query_conditions
+            }
+        },
+        "size": 0  # Only get count, no actual results
+    }
+    
+    resp = requests.post(API_URL, headers=headers, json=preview_query)
+    
+    if resp.status_code == 200:
+        result = resp.json()
+        return result.get('total', 0)
+    else:
+        return 0
+
+def search_executives_for_company_api(company_data, roles, min_experience, location_filter, limit):
+    """Search for executives at a company using the API parameters."""
+    API_KEY = os.getenv("PDL_API_KEY")
+    
+    if not API_KEY:
+        raise Exception("PDL_API_KEY not found in environment variables")
+    
+    API_URL = "https://api.peopledatalabs.com/v5/person/search"
+    headers = {"X-Api-Key": API_KEY}
+    
+    company_name = company_data['name']
+    website_url = company_data.get('website', '')
+    
+    # Build query conditions
+    query_conditions = []
+    
+    # Try website first, then company name
+    if website_url:
+        domain = extract_domain_from_url_api(website_url)
+        if domain:
+            query_conditions.append({"term": {"job_company_website": domain}})
+    
+    if not query_conditions:
+        query_conditions.append({"term": {"job_company_name": company_name.lower()}})
+    
+    # Add role conditions
+    role_conditions = [{"match_phrase": {"job_title": role.lower()}} for role in roles]
+    query_conditions.append({"bool": {"should": role_conditions}})
+    
+    # Add experience filter
+    query_conditions.append({"range": {"inferred_years_experience": {"gte": min_experience}}})
+    
+    # Add location filter if provided
+    if location_filter:
+        query_conditions.append({"match": {"location_name": location_filter}})
+    
+    # Build the search query
+    search_query = {
+        "query": {
+            "bool": {
+                "must": query_conditions
+            }
+        },
+        "size": limit
+    }
+    
+    resp = requests.post(API_URL, headers=headers, json=search_query)
+    
+    if resp.status_code == 200:
+        result = resp.json()
+        if result.get('data'):
+            return extract_executives_from_pdl_response_api(result, company_name)
+        else:
+            return []
+    else:
+        return []
+
+def extract_domain_from_url_api(url):
+    """Extract clean domain from URL for API use."""
+    if not url:
+        return ""
+    
+    if not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
+    
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower()
+        
+        if domain.startswith('www.'):
+            domain = domain[4:]
+            
+        return domain
+    except Exception:
+        return ""
+
+def extract_executives_from_pdl_response_api(pdl_response, company_name):
+    """Extract and flatten executive data from PDL API response for API use."""
+    
+    if not pdl_response.get('data'):
+        return []
+    
+    executives = []
+    
+    for exec_data in pdl_response['data']:
+        # Create simplified executive data structure
+        executive = {
+            "full_name": exec_data.get('full_name', ''),
+            "first_name": exec_data.get('first_name', ''),
+            "last_name": exec_data.get('last_name', ''),
+            "current_title": exec_data.get('job_title', ''),
+            "current_company": company_name,
+            "work_email": exec_data.get('work_email', ''),
+            "personal_emails": ', '.join(exec_data.get('personal_emails', [])),
+            "linkedin_url": exec_data.get('linkedin_url', ''),
+            "location": exec_data.get('location_name', ''),
+            "years_experience": exec_data.get('inferred_years_experience', ''),
+            "extraction_date": datetime.now().strftime('%Y-%m-%d')
+        }
+        
+        executives.append(executive)
+    
+    return executives
+
+def write_executives_to_csv_api(executives, output_path):
+    """Write executives to CSV file for API use."""
+    
+    if not executives:
+        return
+    
+    fieldnames = list(executives[0].keys())
+    
+    with open(output_path, 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        
+        for executive in executives:
+            writer.writerow(executive)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
